@@ -305,6 +305,21 @@ class FP400Node:
 
     @callback
     def _on_attribute_updated(self, event: EventType, data: Any) -> None:
+        # The client runs subscribers inside its listen loop: an exception here drops the
+        # whole server connection, so never let one escape.
+        try:
+            self._handle_attribute_updated(data)
+        except Exception:
+            LOGGER.exception("%s: failed to handle attribute update %s", self.name, data)
+
+    @callback
+    def _on_node_event(self, event: EventType, data: MatterNodeEvent) -> None:
+        try:
+            self._handle_node_event(data)
+        except Exception:
+            LOGGER.exception("%s: failed to handle node event %s", self.name, data)
+
+    def _handle_attribute_updated(self, data: Any) -> None:
         # data = (node_id, attribute_path, value)
         try:
             _, path, _ = data
@@ -317,8 +332,7 @@ class FP400Node:
             return
         self._notify()
 
-    @callback
-    def _on_node_event(self, event: EventType, data: MatterNodeEvent) -> None:
+    def _handle_node_event(self, data: MatterNodeEvent) -> None:
         payload = _event_payload(data.data)
         if data.cluster_id == CLUSTER_LOCATION and data.event_id == EVENT_LOCATION_INFO:
             if data.endpoint_id != SENSOR_ENDPOINT:
@@ -329,7 +343,8 @@ class FP400Node:
             self._notify()
         elif data.cluster_id == CLUSTER_RADAR and data.event_id == EVENT_MOTION_DETECTED:
             code = _get(payload, "motion", 0, default=None) if isinstance(payload, dict) else payload
-            if code is None:
+            if not isinstance(code, int | str) or (isinstance(code, str) and not code.isdigit()):
+                LOGGER.debug("%s: unexpected MotionDetected payload %r", self.name, data.data)
                 return
             self.last_motion = MOTION_EVENTS.get(int(code), str(code))
             zone_ids = {ep: zid for zid, ep in self.zone_endpoints().items()}
