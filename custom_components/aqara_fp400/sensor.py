@@ -68,6 +68,8 @@ class ZonesSensor(FP400Entity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
             "zones": [zone.as_dict() for zone in self.fp.zones],
+            "pending": self.fp.zones_pending,
+            "error": self.fp.zones_error,
             "max_zones": self.fp.max_zones,
             "zone_endpoints": self.fp.zone_endpoints(),
             "grid_rows": GRID_ROWS,

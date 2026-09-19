@@ -54,10 +54,11 @@ EVENT_MOTION_DETECTED = 0
 
 SENSOR_ENDPOINT = 1
 
-# Detection grid: 20 columns x 16 rows of ~50 cm cells, row 0 nearest the sensor,
-# column 8 roughly straight ahead. bit = row * COLS + col, MSB first.
-GRID_COLS = 20
-GRID_ROWS = 16
+# Detection grid: 16 columns x 20 rows of ~50 cm cells, row 0 nearest the sensor,
+# column 8 straight ahead (columns grow as x decreases). bit = row * COLS + col, MSB first.
+# Verified 2026-09-19 with single-column zones against the device's own zone assignment.
+GRID_COLS = 16
+GRID_ROWS = 20
 MASK_BYTES = GRID_COLS * GRID_ROWS // 8
 MAX_ZONES = 8
 MAX_TARGETS = 3  # number of per-target x/y sensors created

@@ -130,7 +130,7 @@
   "services": {
     "set_zones": {
       "name": "Set zones",
-      "description": "Replaces all detection zones. Cells are [row, column] on the 16 x 20 grid (row 0 nearest the sensor, column 8 straight ahead) or a \"rows,cols\" range such as \"3-4,6-10\".",
+      "description": "Replaces all detection zones. Cells are [row, column] on the 20-row x 16-column grid (row 0 nearest the sensor, column 8 straight ahead) or a \"rows,cols\" range such as \"3-4,6-10\".",
       "fields": {
         "device_id": {
           "name": "Device",

@@ -51,8 +51,10 @@ data:
 
 ## The grid
 
-20 columns × 16 rows of roughly 50 cm cells. Row 0 is the row nearest the sensor, column 8 is straight ahead;
-columns grow as `x` decreases. `x`/`y` in the target attributes are centimetres (`y` = distance from the sensor).
+16 columns × 20 rows of roughly 50 cm cells. Row 0 is the row nearest the sensor, column 8 is straight ahead;
+columns grow as `x` decreases (column ≈ 8 − round((x + 25) / 50), row ≈ y / 50). `x`/`y` in the target attributes are
+centimetres (`y` = distance from the sensor). The layout was verified by letting the device assign a person to
+single-column test zones.
 
 ## Zone card
 

@@ -18,8 +18,8 @@ CLUSTER_CONFIG = 0x115FFC0A
 CLUSTER_LOCATION = 0x115FFC0C
 CLUSTER_RADAR = 0x115FFC0B
 
-# zone 1 = cells (4,8) and (4,9): bits 88, 89 -> byte 11 = 0b11000000
-ZONE_MASK = bytes(11) + bytes([0xC0]) + bytes(28)
+# zone 1 = cells (4,8) and (4,9): bits 4*16+8 = 72, 73 -> byte 9 = 0b11000000
+ZONE_MASK = bytes(9) + bytes([0xC0]) + bytes(30)
 
 
 @pytest.fixture
@@ -130,12 +130,14 @@ async def test_set_zones_service(hass: HomeAssistant, matter_client: MagicMock, 
     assert [z["zoneId"] for z in zones] == [2, 5]
     mask = zones[0]["cells"]
     assert len(mask) == 40
-    # rows 3-4, cols 6-10 -> bits 66..70 and 86..90
+    # rows 3-4, cols 6-10 -> bits row*16+col
     bits = {i for i in range(320) if mask[i // 8] & (0x80 >> (i % 8))}
-    assert bits == {3 * 20 + c for c in range(6, 11)} | {4 * 20 + c for c in range(6, 11)}
+    assert bits == {3 * 16 + c for c in range(6, 11)} | {4 * 16 + c for c in range(6, 11)}
     assert zones[1]["cells"][0] == 0x80 and zones[1]["enabled"] is False
     assert response["zones"][0]["id"] == 2
-    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_zones").state == "2"
+    state = hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_zones")
+    assert state.state == "2"
+    assert state.attributes["pending"] is True
 
 
 async def test_live_tracking_switch(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:

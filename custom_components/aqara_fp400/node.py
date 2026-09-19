@@ -80,12 +80,12 @@ class Target:
     row: int
     col: int
     activity: str
-    zone_mask: int
+    zone_id: int | None
 
     @property
     def zones(self) -> list[int]:
-        """Zone ids the target is inside."""
-        return [i + 1 for i in range(MAX_ZONES) if self.zone_mask & (1 << i)]
+        """Zone ids the target is inside (the device reports one)."""
+        return [] if self.zone_id is None else [self.zone_id]
 
     def as_dict(self) -> dict[str, Any]:
         """Dict for entity attributes."""
@@ -117,6 +117,10 @@ def _event_payload(data: Any) -> Any:
     return data
 
 
+def _zone_signature(zones: list[Zone]) -> list[tuple[int, bool, tuple[tuple[int, int], ...]]]:
+    return sorted((z.zone_id, z.enabled, tuple(tuple(c) for c in sorted(z.cells))) for z in zones)
+
+
 def parse_zone(raw: Any) -> Zone | None:
     """Parse one entry of the Zones attribute."""
     if not isinstance(raw, dict):
@@ -146,8 +150,16 @@ def parse_target(raw: Any) -> Target | None:
         row=row,
         col=col,
         activity=ACTIVITY_STATES.get(int(_get(raw, "activityState", 4, default=0) or 0), "unknown"),
-        zone_mask=int(_get(raw, "zoneMask", 8, default=0) or 0),
+        zone_id=_zone_id(_get(raw, "zoneMask", "zoneId", 8, default=None)),
     )
+
+
+def _zone_id(value: Any) -> int | None:
+    """Field 8 of a target is the id of the zone it is in; absent or 0/255 means none."""
+    if value is None:
+        return None
+    value = int(value)
+    return value if 1 <= value <= MAX_ZONES else None
 
 
 @dataclass
@@ -164,6 +176,8 @@ class FP400Node:
     last_motion_zone: int | None = None
     last_motion_at: datetime | None = None
     live_tracking: bool = False
+    zones_pending: bool = False
+    zones_error: str | None = None
     _listeners: list[Callable[[], None]] = field(default_factory=list)
     _unsubscribe: list[Callable[[], None]] = field(default_factory=list)
     _renew_task: asyncio.Task | None = None
@@ -258,7 +272,7 @@ class FP400Node:
     async def async_start(self) -> None:
         """Subscribe to node events and attribute updates."""
         self._refresh_zones()
-        self.hass.async_create_background_task(self.async_read_zones(), f"{self.name} read zones")
+        self.hass.async_create_background_task(self._async_initial_zones(), f"{self.name} read zones")
         self._unsubscribe.append(
             self.matter_client.subscribe_events(
                 callback=self._on_node_event,
@@ -298,18 +312,52 @@ class FP400Node:
 
     # ---- incoming data ---------------------------------------------------
 
-    async def async_read_zones(self) -> None:
+    async def async_read_zones(self) -> list[Zone] | None:
         """Read the zone list from the device; the server's subscription cache misses its changes."""
         path = f"{SENSOR_ENDPOINT}/{CLUSTER_CONFIG}/{ATTR_ZONES}"
         try:
             result = await self.matter_client.read_attribute(self.node_id, path)
         except Exception as err:
             LOGGER.debug("%s: reading zones failed: %s", self.name, err)
-            return
-        if isinstance(result, dict) and path in result:
-            self.node.node_data.attributes[path] = result[path]
-            self._refresh_zones()
+            return None
+        if not isinstance(result, dict) or path not in result:
+            return None
+        self.node.node_data.attributes[path] = result[path]
+        return sorted(
+            (z for z in (parse_zone(item) for item in result[path] or []) if z is not None), key=lambda z: z.zone_id
+        )
+
+    async def _async_initial_zones(self) -> None:
+        if (zones := await self.async_read_zones()) is not None:
+            self.zones = zones
             self._notify()
+
+    async def _async_verify_zones(self, expected: list[Zone]) -> None:
+        """Poll the device until its zone list matches what was written (it applies changes lazily)."""
+        want = _zone_signature(expected)
+        got: list[Zone] | None = None
+        for delay in (0.5, 1, 1.5, 2, 2, 3, 3, 4):
+            await asyncio.sleep(delay)
+            got = await self.async_read_zones()
+            if got is not None and _zone_signature(got) == want:
+                self.zones, self.zones_pending, self.zones_error = got, False, None
+                self._notify()
+                return
+        self.zones_pending = False
+        if got is None:
+            self.zones_error = "could not read the zones back from the device"
+        else:
+            self.zones = got
+            self.zones_error = "device kept a different zone list"
+        LOGGER.warning("%s: %s", self.name, self.zones_error)
+        self._notify()
+
+    async def _async_apply_zones(self, zones: list[Zone]) -> None:
+        """Show the written zones immediately and confirm them in the background."""
+        self.zones = sorted(zones, key=lambda zone: zone.zone_id)
+        self.zones_pending, self.zones_error = True, None
+        self._notify()
+        self.hass.async_create_background_task(self._async_verify_zones(self.zones), f"{self.name} verify zones")
 
     @callback
     def _refresh_zones(self) -> None:
@@ -387,25 +435,19 @@ class FP400Node:
             raise ValueError(f"zone ids must be unique and between 1 and {self.max_zones}")
         result = await self._command(CLUSTER_CONFIG, "SetZones", {"zones": [zone.as_payload() for zone in zones]})
         self._check_status(result)
-        self.zones = sorted(zones, key=lambda zone: zone.zone_id)
-        self._notify()
-        await self.async_read_zones()
+        await self._async_apply_zones(zones)
 
     async def async_append_zone(self, zone: Zone) -> None:
         """Add or replace one zone."""
         result = await self._command(CLUSTER_CONFIG, "AppendZone", {"zone": zone.as_payload()})
         self._check_status(result)
-        self.zones = sorted([z for z in self.zones if z.zone_id != zone.zone_id] + [zone], key=lambda z: z.zone_id)
-        self._notify()
-        await self.async_read_zones()
+        await self._async_apply_zones([z for z in self.zones if z.zone_id != zone.zone_id] + [zone])
 
     async def async_remove_zone(self, zone_id: int) -> None:
         """Remove one zone."""
         result = await self._command(CLUSTER_CONFIG, "RemoveZone", {"zoneId": zone_id})
         self._check_status(result)
-        self.zones = [z for z in self.zones if z.zone_id != zone_id]
-        self._notify()
-        await self.async_read_zones()
+        await self._async_apply_zones([z for z in self.zones if z.zone_id != zone_id])
 
     async def async_start_learning(self) -> None:
         """Kick off the AI space background learning."""

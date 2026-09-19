@@ -9,10 +9,12 @@
  *   title: Living room                      (optional)
  */
 
-const COLS = 20;
-const ROWS = 16;
-// column 8 is straight ahead of the sensor (x ≈ -22 cm); columns grow as x decreases
-const AHEAD_COL = 8.5 - 22 / 50;
+// Defaults; the Zones sensor reports grid_cols/grid_rows and the card follows those.
+let COLS = 16;
+let ROWS = 20;
+// column 8 is straight ahead of the sensor (x ≈ -25 cm); columns grow as x decreases
+const AHEAD_COL = 8.5 - 25 / 50;
+const CELL_CM = 50;
 const ZONE_COLORS = ["#4f8ef7", "#f75f4f", "#3bbf6a", "#f2b600", "#a35bf7", "#19b5c9", "#f77b1c", "#c9198f"];
 
 class AqaraFp400ZoneCard extends HTMLElement {
@@ -75,10 +77,24 @@ class AqaraFp400ZoneCard extends HTMLElement {
         <div class="header"><span class="title"></span><span class="status"></span></div>
         <div class="grid"><svg viewBox="0 0 ${COLS} ${ROWS}" preserveAspectRatio="none"></svg></div>
         <div class="toolbar"></div>
-        <div class="hint">Cells are ~50 cm; the sensor is the triangle at the bottom. Click or drag to paint the selected zone, double-click a zone chip to disable it, then Save.</div>
+        <div class="hint">Cells are ~50 cm; the sensor is the triangle at the bottom. Click or drag to paint the selected zone, double-click a zone chip to disable it, then Save. "verifying…" means the device is still applying the change.</div>
         <div class="error"></div>
       </ha-card>`;
     this._svg = root.querySelector("svg");
+    this._buildGrid();
+
+    const grid = root.querySelector(".grid");
+    grid.addEventListener("pointerdown", (ev) => this._onPointer(ev, true));
+    grid.addEventListener("pointermove", (ev) => this._onPointer(ev, false));
+    grid.addEventListener("pointerup", () => (this._pointerDown = false));
+    grid.addEventListener("pointerleave", () => (this._pointerDown = false));
+  }
+
+  _buildGrid() {
+    this._gridDims = `${COLS}x${ROWS}`;
+    this._svg.innerHTML = "";
+    this._svg.setAttribute("viewBox", `0 0 ${COLS} ${ROWS}`);
+    this.shadowRoot.querySelector(".grid").style.aspectRatio = `${COLS} / ${ROWS}`;
     this._cells = [];
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
@@ -99,12 +115,6 @@ class AqaraFp400ZoneCard extends HTMLElement {
     this._svg.appendChild(sensor);
     this._targetLayer = document.createElementNS("http://www.w3.org/2000/svg", "g");
     this._svg.appendChild(this._targetLayer);
-
-    const grid = root.querySelector(".grid");
-    grid.addEventListener("pointerdown", (ev) => this._onPointer(ev, true));
-    grid.addEventListener("pointermove", (ev) => this._onPointer(ev, false));
-    grid.addEventListener("pointerup", () => (this._pointerDown = false));
-    grid.addEventListener("pointerleave", () => (this._pointerDown = false));
   }
 
   // ---------------------------------------------------------------- state
@@ -145,12 +155,24 @@ class AqaraFp400ZoneCard extends HTMLElement {
     if (!this._hass || !this.shadowRoot) return;
     const root = this.shadowRoot;
     const state = this._hass.states[this._config.entity];
+    const cols = Number(state?.attributes?.grid_cols) || COLS;
+    const rows = Number(state?.attributes?.grid_rows) || ROWS;
+    if (`${cols}x${rows}` !== this._gridDims) {
+      COLS = cols;
+      ROWS = rows;
+      this._buildGrid();
+    }
     root.querySelector(".title").textContent = this._config.title || state?.attributes?.friendly_name?.replace(/ Zones$/, "") || "FP400";
     const targetsState = this._hass.states[this._targetsEntity()];
     const targets = targetsState?.attributes?.targets || [];
     const live = targetsState?.attributes?.live_tracking;
+    let sync = "synced";
+    if (this._saving) sync = "saving…";
+    else if (this._edit) sync = "unsaved";
+    else if (state?.attributes?.pending) sync = "verifying…";
+    else if (state?.attributes?.error) sync = "⚠ " + state.attributes.error;
     root.querySelector(".status").textContent = state
-      ? `${targets.length} tracked · ${targetsState?.attributes?.activity_state || "?"}${live ? " · live" : ""}${this._edit ? " · unsaved" : ""}`
+      ? `${targets.length} tracked · ${targetsState?.attributes?.activity_state || "?"}${live ? " · live" : ""} · ${sync}`
       : "entity not found";
 
     const zones = this._zones();
@@ -165,8 +187,8 @@ class AqaraFp400ZoneCard extends HTMLElement {
 
     this._targetLayer.innerHTML = "";
     for (const t of targets) {
-      const u = AHEAD_COL - t.x / 50;
-      const v = ROWS - t.y / 50;
+      const u = AHEAD_COL - t.x / CELL_CM;
+      const v = ROWS - t.y / CELL_CM;
       const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       dot.setAttribute("cx", Math.min(COLS - 0.3, Math.max(0.3, u)));
       dot.setAttribute("cy", Math.min(ROWS - 0.3, Math.max(0.3, v)));
@@ -212,8 +234,8 @@ class AqaraFp400ZoneCard extends HTMLElement {
     bar.appendChild(revert);
 
     const save = document.createElement("button");
-    save.textContent = "Save";
-    save.disabled = !this._edit;
+    save.textContent = this._saving ? "Saving…" : "Save";
+    save.disabled = !this._edit || this._saving;
     save.addEventListener("click", () => this._save());
     bar.appendChild(save);
   }
@@ -265,12 +287,16 @@ class AqaraFp400ZoneCard extends HTMLElement {
       type: zone.type || 0,
       cells: [...zone.cells].sort((a, b) => a - b).map((idx) => [Math.floor(idx / COLS), idx % COLS]),
     }));
+    this._saving = true;
+    this._render();
     try {
       await this._hass.callService("aqara_fp400", "set_zones", { device_id: deviceId, zones });
       this._edit = null;
-      this._render();
     } catch (err) {
       error.textContent = err?.message || String(err);
+    } finally {
+      this._saving = false;
+      this._render();
     }
   }
 }
