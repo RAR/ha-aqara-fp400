@@ -1,7 +1,8 @@
 {
   "after_dependencies": [
     "http",
-    "frontend"
+    "frontend",
+    "lovelace"
   ],
   "codeowners": [
     "@rar"
@@ -18,5 +19,5 @@
   "name": "Aqara FP400 (Matter)",
   "requirements": [],
   "single_config_entry": true,
-  "version": "0.1.1"
+  "version": "0.1.2"
 }

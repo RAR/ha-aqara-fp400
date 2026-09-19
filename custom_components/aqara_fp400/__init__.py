@@ -102,13 +102,17 @@ async def async_unload_entry(hass: HomeAssistant, entry: FP400ConfigEntry) -> bo
 
 
 async def _async_register_card(hass: HomeAssistant) -> None:
-    """Serve the bundled Lovelace card (skipped when http/frontend are not loaded, e.g. in tests)."""
+    """Serve the bundled card and register it as a Lovelace resource (like HACS does).
+
+    Skipped when http/frontend are not loaded (tests). Injecting the script through
+    add_extra_js_url no longer works: the frontend's scoped custom-element registry
+    doesn't see elements defined by scripts that ran before it.
+    """
     if hass.data.get(f"{DOMAIN}_card_registered") or "frontend" not in hass.config.components:
         return
     import mimetypes
 
     from aiohttp.web_fileresponse import CONTENT_TYPES
-    from homeassistant.components.frontend import add_extra_js_url
     from homeassistant.components.http import StaticPathConfig
 
     hass.data[f"{DOMAIN}_card_registered"] = True
@@ -119,7 +123,22 @@ async def _async_register_card(hass: HomeAssistant) -> None:
     card = Path(__file__).parent / "www" / "aqara-fp400-zone-card.js"
     await hass.http.async_register_static_paths([StaticPathConfig(CARD_URL, str(card), cache_headers=False)])
     version = (await async_get_integration(hass, DOMAIN)).version
-    add_extra_js_url(hass, f"{CARD_URL}?v={version}")
+    url = f"{CARD_URL}?v={version}"
+
+    lovelace = hass.data.get("lovelace")
+    resources = getattr(lovelace, "resources", None)
+    if resources is None or not hasattr(resources, "async_create_item"):
+        LOGGER.warning("Lovelace resources are in YAML mode; add %s as a module resource yourself", url)
+        return
+    if not getattr(resources, "loaded", True):
+        await resources.async_load()
+    for item in resources.async_items():
+        if not str(item.get("url", "")).startswith(CARD_URL):
+            continue
+        if item["url"] != url:
+            await resources.async_update_item(item["id"], {"url": url})
+        return
+    await resources.async_create_item({"res_type": "module", "url": url})
 
 
 # ---------------------------------------------------------------------------
