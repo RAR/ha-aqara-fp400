@@ -1,0 +1,53 @@
+set_zones:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          filter:
+            - integration: aqara_fp400
+            - integration: matter
+    zones:
+      required: true
+      example: |
+        - id: 1
+          cells: "3-4,6-10"
+        - id: 2
+          cells: [[2, 8], [2, 9], [3, 8], [3, 9]]
+          enabled: true
+      selector:
+        object:
+clear_zones:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          filter:
+            - integration: aqara_fp400
+            - integration: matter
+subscribe_location:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          filter:
+            - integration: aqara_fp400
+            - integration: matter
+    timeout:
+      default: 3600
+      selector:
+        number:
+          min: 1
+          max: 3600
+          unit_of_measurement: s
+start_learning:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          filter:
+            - integration: aqara_fp400
+            - integration: matter

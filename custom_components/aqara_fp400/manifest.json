@@ -1,0 +1,22 @@
+{
+  "after_dependencies": [
+    "http",
+    "frontend"
+  ],
+  "codeowners": [
+    "@rar"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "matter"
+  ],
+  "documentation": "https://github.com/rar/aqara-fp400-ha",
+  "domain": "aqara_fp400",
+  "integration_type": "hub",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/rar/aqara-fp400-ha/issues",
+  "name": "Aqara FP400 (Matter)",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "0.1.0"
+}

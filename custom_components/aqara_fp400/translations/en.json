@@ -1,0 +1,67 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "description": "Adds zones, live target positions and setup commands for every Aqara FP400 known to the Matter integration."
+      }
+    },
+    "abort": {
+      "matter_not_loaded": "The Matter integration must be set up first.",
+      "single_instance_allowed": "Already configured."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "zones": { "name": "Zones" },
+      "targets": { "name": "Tracked people" },
+      "target_x": { "name": "Target {index} x" },
+      "target_y": { "name": "Target {index} y" },
+      "last_motion": {
+        "name": "Last motion",
+        "state": {
+          "enter": "Enter",
+          "left": "Left",
+          "left_in": "Left in",
+          "right_out": "Right out",
+          "right_in": "Right in",
+          "left_out": "Left out",
+          "access": "Access",
+          "away": "Away"
+        }
+      }
+    },
+    "switch": { "live_tracking": { "name": "Live tracking" } },
+    "button": {
+      "start_learning": { "name": "Start background learning" },
+      "clear_zones": { "name": "Clear zones" }
+    }
+  },
+  "services": {
+    "set_zones": {
+      "name": "Set zones",
+      "description": "Replaces all detection zones. Cells are [row, column] on the 16 x 20 grid (row 0 nearest the sensor, column 8 straight ahead) or a \"rows,cols\" range such as \"3-4,6-10\".",
+      "fields": {
+        "device_id": { "name": "Device", "description": "The FP400." },
+        "zones": { "name": "Zones", "description": "List of zones with id (1-8), cells and optional enabled flag." }
+      }
+    },
+    "clear_zones": {
+      "name": "Clear zones",
+      "description": "Removes every zone.",
+      "fields": { "device_id": { "name": "Device", "description": "The FP400." } }
+    },
+    "subscribe_location": {
+      "name": "Subscribe to location data",
+      "description": "Streams target positions for the given time; the Live tracking switch does this continuously.",
+      "fields": {
+        "device_id": { "name": "Device", "description": "The FP400." },
+        "timeout": { "name": "Duration", "description": "Seconds, up to 3600." }
+      }
+    },
+    "start_learning": {
+      "name": "Start background learning",
+      "description": "Starts the AI space background learning (edge and interference recognition).",
+      "fields": { "device_id": { "name": "Device", "description": "The FP400." } }
+    }
+  }
+}

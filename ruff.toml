@@ -1,0 +1,10 @@
+target-version = "py314"
+line-length = 120
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["RUF012"]
+
+[lint.isort]
+force-sort-within-sections = true
+known-first-party = ["custom_components"]
