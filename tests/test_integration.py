@@ -179,3 +179,20 @@ async def test_config_entities(hass: HomeAssistant, matter_client: MagicMock, fp
     assert call.args[0] == APICommand.WRITE_ATTRIBUTE
     assert call.kwargs["attribute_path"] == f"1/{CLUSTER_CONFIG}/4" and call.kwargs["value"] == 2200
     assert hass.states.get("number.aqara_spatial_multi_sensor_fp400_radar_install_height").state == "2200.0"
+
+
+async def test_reloads_with_matter(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:
+    """A Matter integration reload (new client) reloads this integration too."""
+    from homeassistant.config_entries import ConfigEntryState
+
+    matter_entry = hass.config_entries.async_loaded_entries("matter")[0]
+    own_entry = hass.config_entries.async_loaded_entries("aqara_fp400")[0]
+    setups_before = matter_client.subscribe_events.call_count
+
+    await hass.config_entries.async_reload(matter_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert matter_entry.state is ConfigEntryState.LOADED
+    assert own_entry.state is ConfigEntryState.LOADED
+    assert matter_client.subscribe_events.call_count > setups_before
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_zones").state == "1"

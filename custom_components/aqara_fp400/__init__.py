@@ -12,10 +12,10 @@ from pathlib import Path
 from typing import Any
 
 from homeassistant.components.matter.helpers import get_matter
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse, callback
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -62,10 +62,23 @@ def is_fp400(node: MatterNode) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: FP400ConfigEntry) -> bool:
     """Set up from a config entry."""
-    matter = get_matter(hass)
-    client = matter.matter_client
+    matter_entries = hass.config_entries.async_loaded_entries("matter")
+    if not matter_entries:
+        raise ConfigEntryNotReady("The Matter integration is not loaded")
+    matter_entry = matter_entries[0]
+    client = get_matter(hass).matter_client
     data = FP400Data()
     entry.runtime_data = data
+
+    # The Matter integration reloads itself (new client object) whenever the server connection
+    # drops; follow it so we never keep talking to a dead client.
+    @callback
+    def _on_matter_state_change() -> None:
+        if matter_entry.state is ConfigEntryState.LOADED and entry.state is ConfigEntryState.LOADED:
+            LOGGER.debug("Matter integration reloaded; reloading %s", DOMAIN)
+            hass.config_entries.async_schedule_reload(entry.entry_id)
+
+    entry.async_on_unload(matter_entry.async_on_state_change(_on_matter_state_change))
 
     await _async_register_card(hass)
 
