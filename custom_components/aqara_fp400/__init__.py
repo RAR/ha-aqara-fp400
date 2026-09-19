@@ -6,6 +6,7 @@ entities attached to the existing Matter device.
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.loader import async_get_integration
 from matter_server.client.models.node import MatterNode
 from matter_server.common.models import EventType
 import voluptuous as vol
@@ -103,13 +105,21 @@ async def _async_register_card(hass: HomeAssistant) -> None:
     """Serve the bundled Lovelace card (skipped when http/frontend are not loaded, e.g. in tests)."""
     if hass.data.get(f"{DOMAIN}_card_registered") or "frontend" not in hass.config.components:
         return
+    import mimetypes
+
+    from aiohttp.web_fileresponse import CONTENT_TYPES
     from homeassistant.components.frontend import add_extra_js_url
     from homeassistant.components.http import StaticPathConfig
 
     hass.data[f"{DOMAIN}_card_registered"] = True
+    # Some images map .js to text/plain; with nosniff the browser then refuses the module.
+    mimetypes.add_type("text/javascript", ".js")
+    with contextlib.suppress(AttributeError):
+        CONTENT_TYPES.add_type("text/javascript", ".js")
     card = Path(__file__).parent / "www" / "aqara-fp400-zone-card.js"
     await hass.http.async_register_static_paths([StaticPathConfig(CARD_URL, str(card), cache_headers=False)])
-    add_extra_js_url(hass, CARD_URL)
+    version = (await async_get_integration(hass, DOMAIN)).version
+    add_extra_js_url(hass, f"{CARD_URL}?v={version}")
 
 
 # ---------------------------------------------------------------------------
