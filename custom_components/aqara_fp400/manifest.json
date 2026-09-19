@@ -19,5 +19,5 @@
   "name": "Aqara FP400 (Matter)",
   "requirements": [],
   "single_config_entry": true,
-  "version": "0.1.3"
+  "version": "0.1.4"
 }

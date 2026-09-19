@@ -258,6 +258,7 @@ class FP400Node:
     async def async_start(self) -> None:
         """Subscribe to node events and attribute updates."""
         self._refresh_zones()
+        self.hass.async_create_background_task(self.async_read_zones(), f"{self.name} read zones")
         self._unsubscribe.append(
             self.matter_client.subscribe_events(
                 callback=self._on_node_event,
@@ -296,6 +297,19 @@ class FP400Node:
             listener()
 
     # ---- incoming data ---------------------------------------------------
+
+    async def async_read_zones(self) -> None:
+        """Read the zone list from the device; the server's subscription cache misses its changes."""
+        path = f"{SENSOR_ENDPOINT}/{CLUSTER_CONFIG}/{ATTR_ZONES}"
+        try:
+            result = await self.matter_client.read_attribute(self.node_id, path)
+        except Exception as err:
+            LOGGER.debug("%s: reading zones failed: %s", self.name, err)
+            return
+        if isinstance(result, dict) and path in result:
+            self.node.node_data.attributes[path] = result[path]
+            self._refresh_zones()
+            self._notify()
 
     @callback
     def _refresh_zones(self) -> None:
@@ -375,6 +389,7 @@ class FP400Node:
         self._check_status(result)
         self.zones = sorted(zones, key=lambda zone: zone.zone_id)
         self._notify()
+        await self.async_read_zones()
 
     async def async_append_zone(self, zone: Zone) -> None:
         """Add or replace one zone."""
@@ -382,6 +397,7 @@ class FP400Node:
         self._check_status(result)
         self.zones = sorted([z for z in self.zones if z.zone_id != zone.zone_id] + [zone], key=lambda z: z.zone_id)
         self._notify()
+        await self.async_read_zones()
 
     async def async_remove_zone(self, zone_id: int) -> None:
         """Remove one zone."""
@@ -389,6 +405,7 @@ class FP400Node:
         self._check_status(result)
         self.zones = [z for z in self.zones if z.zone_id != zone_id]
         self._notify()
+        await self.async_read_zones()
 
     async def async_start_learning(self) -> None:
         """Kick off the AI space background learning."""

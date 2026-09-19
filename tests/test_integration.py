@@ -36,6 +36,7 @@ async def fp400(hass: HomeAssistant, matter_client: MagicMock, enable_custom_int
         },
     )
     matter_client.send_command.return_value = {"status": 0}
+    matter_client.read_attribute.return_value = {}
     entry = MockConfigEntry(domain="aqara_fp400", data={})
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
