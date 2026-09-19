@@ -21,6 +21,10 @@ on a "<device> radar" device linked to the sensor's Matter device.
 | `sensor.<name>_radar_tracked_people` | people currently tracked; attribute `targets` = `[{id, x, y, row, col, activity, zones}]` (cm) |
 | `sensor.<name>_radar_target_N_x` / `_y` | position of target N (disabled by default; enable for radar map cards) |
 | `sensor.<name>_radar_last_motion` | last motion event: enter / left / left_in / right_out / right_in / left_out / access / away |
+| `sensor.<name>_radar_activity_state` / `_human_count` | activity (unknown/active/still) and the device's people count |
+| `sensor.<name>_radar_install_status` / `_install_angle` | orientation from the tilt sensor (diagnostic) |
+| `select.<name>_radar_install_mode` / `_side_install` / `_coordinate_reverse` / `_detection_direction` / `_proximity_distance_level` | install and detection settings |
+| `number.<name>_radar_install_height` | mounting height in mm (limits from the device) |
 | `switch.<name>_radar_live_tracking` | keeps the position stream alive (~7 updates/s while someone moves) |
 | `button.<name>_radar_start_background_learning` | starts the AI space background learning |
 | `button.<name>_radar_clear_zones` | removes all zones |

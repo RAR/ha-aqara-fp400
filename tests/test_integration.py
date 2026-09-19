@@ -155,3 +155,26 @@ async def test_live_tracking_switch(hass: HomeAssistant, matter_client: MagicMoc
         blocking=True,
     )
     assert hass.states.get("switch.aqara_spatial_multi_sensor_fp400_radar_live_tracking").state == "off"
+
+
+async def test_config_entities(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:
+    """Install settings are exposed and written through the server."""
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_install_status").state == "tilted_facing_down"
+    assert hass.states.get("select.aqara_spatial_multi_sensor_fp400_radar_install_mode").state == "side_mount"
+    height = hass.states.get("number.aqara_spatial_multi_sensor_fp400_radar_install_height")
+    assert height.state == "2000.0"
+    assert height.attributes["min"] == 1500 and height.attributes["max"] == 4000
+
+    matter_client.send_command.return_value = [
+        {"Path": {"EndpointId": 1, "ClusterId": CLUSTER_CONFIG, "AttributeId": 4}, "Status": 0}
+    ]
+    await hass.services.async_call(
+        "number",
+        "set_value",
+        {"entity_id": "number.aqara_spatial_multi_sensor_fp400_radar_install_height", "value": 2200},
+        blocking=True,
+    )
+    call = matter_client.send_command.call_args
+    assert call.args[0] == APICommand.WRITE_ATTRIBUTE
+    assert call.kwargs["attribute_path"] == f"1/{CLUSTER_CONFIG}/4" and call.kwargs["value"] == 2200
+    assert hass.states.get("number.aqara_spatial_multi_sensor_fp400_radar_install_height").state == "2200.0"

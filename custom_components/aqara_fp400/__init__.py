@@ -36,7 +36,7 @@ from .const import (
 )
 from .node import FP400Node, Zone
 
-PLATFORMS = [Platform.SENSOR, Platform.SWITCH, Platform.BUTTON]
+PLATFORMS = [Platform.SENSOR, Platform.SWITCH, Platform.BUTTON, Platform.SELECT, Platform.NUMBER]
 SIGNAL_NEW_NODE = f"{DOMAIN}_new_node"
 CARD_URL = f"/{DOMAIN}/aqara-fp400-zone-card.js"
 

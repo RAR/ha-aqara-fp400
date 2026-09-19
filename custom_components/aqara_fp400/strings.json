@@ -12,10 +12,18 @@
   },
   "entity": {
     "sensor": {
-      "zones": { "name": "Zones" },
-      "targets": { "name": "Tracked people" },
-      "target_x": { "name": "Target {index} x" },
-      "target_y": { "name": "Target {index} y" },
+      "zones": {
+        "name": "Zones"
+      },
+      "targets": {
+        "name": "Tracked people"
+      },
+      "target_x": {
+        "name": "Target {index} x"
+      },
+      "target_y": {
+        "name": "Target {index} y"
+      },
       "last_motion": {
         "name": "Last motion",
         "state": {
@@ -28,12 +36,95 @@
           "access": "Access",
           "away": "Away"
         }
+      },
+      "activity_state": {
+        "name": "Activity state",
+        "state": {
+          "unknown": "Unknown",
+          "active": "Active",
+          "still": "Still"
+        }
+      },
+      "human_count": {
+        "name": "Human count"
+      },
+      "install_status": {
+        "name": "Install status",
+        "state": {
+          "level_facing_up": "Level, facing up",
+          "level_tilted_facing_up": "Level, tilted facing up",
+          "level_reverse_tilted_facing_up": "Level, reverse tilted facing up",
+          "side_facing_forward": "Side, facing forward",
+          "side_reverse_facing_forward": "Side, reverse facing forward",
+          "top_facing_down": "Top, facing down",
+          "tilted_facing_down": "Tilted, facing down",
+          "reverse_tilted_facing_down": "Reverse tilted, facing down",
+          "invalid": "Invalid"
+        }
+      },
+      "install_angle": {
+        "name": "Install angle"
       }
     },
-    "switch": { "live_tracking": { "name": "Live tracking" } },
+    "switch": {
+      "live_tracking": {
+        "name": "Live tracking"
+      }
+    },
     "button": {
-      "start_learning": { "name": "Start background learning" },
-      "clear_zones": { "name": "Clear zones" }
+      "start_learning": {
+        "name": "Start background learning"
+      },
+      "clear_zones": {
+        "name": "Clear zones"
+      }
+    },
+    "select": {
+      "install_mode": {
+        "name": "Install mode",
+        "state": {
+          "unknown": "Unknown",
+          "side_mount": "Side mount",
+          "top_mount": "Top mount"
+        }
+      },
+      "side_install": {
+        "name": "Side install position",
+        "state": {
+          "unknown": "Unknown",
+          "wall": "Wall",
+          "left_corner": "Left corner",
+          "right_corner": "Right corner"
+        }
+      },
+      "coordinate_reverse": {
+        "name": "Coordinate reverse",
+        "state": {
+          "disabled": "Disabled",
+          "enabled": "Enabled",
+          "auto": "Auto"
+        }
+      },
+      "detection_direction": {
+        "name": "Detection direction",
+        "state": {
+          "omnidirectional": "Omnidirectional",
+          "left_right": "Left/right"
+        }
+      },
+      "proximity_distance_level": {
+        "name": "Proximity distance level",
+        "state": {
+          "far": "Far",
+          "medium": "Medium",
+          "near": "Near"
+        }
+      }
+    },
+    "number": {
+      "install_height": {
+        "name": "Install height"
+      }
     }
   },
   "services": {
@@ -41,27 +132,49 @@
       "name": "Set zones",
       "description": "Replaces all detection zones. Cells are [row, column] on the 16 x 20 grid (row 0 nearest the sensor, column 8 straight ahead) or a \"rows,cols\" range such as \"3-4,6-10\".",
       "fields": {
-        "device_id": { "name": "Device", "description": "The FP400." },
-        "zones": { "name": "Zones", "description": "List of zones with id (1-8), cells and optional enabled flag." }
+        "device_id": {
+          "name": "Device",
+          "description": "The FP400."
+        },
+        "zones": {
+          "name": "Zones",
+          "description": "List of zones with id (1-8), cells and optional enabled flag."
+        }
       }
     },
     "clear_zones": {
       "name": "Clear zones",
       "description": "Removes every zone.",
-      "fields": { "device_id": { "name": "Device", "description": "The FP400." } }
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "The FP400."
+        }
+      }
     },
     "subscribe_location": {
       "name": "Subscribe to location data",
       "description": "Streams target positions for the given time; the Live tracking switch does this continuously.",
       "fields": {
-        "device_id": { "name": "Device", "description": "The FP400." },
-        "timeout": { "name": "Duration", "description": "Seconds, up to 3600." }
+        "device_id": {
+          "name": "Device",
+          "description": "The FP400."
+        },
+        "timeout": {
+          "name": "Duration",
+          "description": "Seconds, up to 3600."
+        }
       }
     },
     "start_learning": {
       "name": "Start background learning",
       "description": "Starts the AI space background learning (edge and interference recognition).",
-      "fields": { "device_id": { "name": "Device", "description": "The FP400." } }
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "The FP400."
+        }
+      }
     }
   }
 }

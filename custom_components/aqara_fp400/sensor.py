@@ -5,13 +5,22 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
-from homeassistant.const import EntityCategory, UnitOfLength
+from homeassistant.const import DEGREE, EntityCategory, UnitOfLength
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import SIGNAL_NEW_NODE, FP400ConfigEntry
-from .const import GRID_COLS, GRID_ROWS, MAX_TARGETS, MOTION_EVENTS
+from .const import (
+    ACTIVITY_STATES,
+    ATTR_INSTALL_ANGLE,
+    ATTR_INSTALL_STATUS,
+    GRID_COLS,
+    GRID_ROWS,
+    INSTALL_STATUSES,
+    MAX_TARGETS,
+    MOTION_EVENTS,
+)
 from .entity import FP400Entity
 from .node import FP400Node
 
@@ -23,7 +32,15 @@ async def async_setup_entry(
 
     @callback
     def _add(fp: FP400Node) -> None:
-        entities: list[FP400Entity] = [ZonesSensor(fp), TargetsSensor(fp), LastMotionSensor(fp)]
+        entities: list[FP400Entity] = [
+            ZonesSensor(fp),
+            TargetsSensor(fp),
+            LastMotionSensor(fp),
+            ActivityStateSensor(fp),
+            HumanCountSensor(fp),
+            InstallStatusSensor(fp),
+            InstallAngleSensor(fp),
+        ]
         for index in range(MAX_TARGETS):
             entities.append(TargetAxisSensor(fp, index, "x"))
             entities.append(TargetAxisSensor(fp, index, "y"))
@@ -121,3 +138,66 @@ class LastMotionSensor(FP400Entity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return {"zone": self.fp.last_motion_zone, "at": self.fp.last_motion_at}
+
+
+class ActivityStateSensor(FP400Entity, SensorEntity):
+    """OccupantLocation ActivityState."""
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = list(ACTIVITY_STATES.values())
+    _attr_icon = "mdi:motion"
+
+    def __init__(self, fp: FP400Node) -> None:
+        super().__init__(fp, "activity_state")
+
+    @property
+    def native_value(self) -> str:
+        return self.fp.activity_state
+
+
+class HumanCountSensor(FP400Entity, SensorEntity):
+    """RadarSensingUnion CurrentHumanCount (255 = unknown → unavailable)."""
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:account-group"
+
+    def __init__(self, fp: FP400Node) -> None:
+        super().__init__(fp, "human_count")
+
+    @property
+    def native_value(self) -> int | None:
+        return self.fp.human_count
+
+
+class InstallStatusSensor(FP400Entity, SensorEntity):
+    """Orientation as measured by the tilt sensor."""
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = list(INSTALL_STATUSES.values())
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:axis-z-rotate-clockwise"
+
+    def __init__(self, fp: FP400Node) -> None:
+        super().__init__(fp, "install_status")
+
+    @property
+    def native_value(self) -> str | None:
+        value = self.fp.config_attr(ATTR_INSTALL_STATUS)
+        return None if value is None else INSTALL_STATUSES.get(int(value))
+
+
+class InstallAngleSensor(FP400Entity, SensorEntity):
+    """Tilt from horizontal."""
+
+    _attr_native_unit_of_measurement = DEGREE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:angle-acute"
+
+    def __init__(self, fp: FP400Node) -> None:
+        super().__init__(fp, "install_angle")
+
+    @property
+    def native_value(self) -> int | None:
+        value = self.fp.config_attr(ATTR_INSTALL_ANGLE)
+        return None if value is None else int(value)

@@ -16,11 +16,38 @@ CLUSTER_CONFIG = 0x115FFC0A  # AmbientSensingConfiguration
 CLUSTER_RADAR = 0x115FFC0B  # RadarSensingUnion
 CLUSTER_LOCATION = 0x115FFC0C  # OccupantLocation
 
+ATTR_INSTALL_MODE = 0
+ATTR_SIDE_INSTALL = 2
+ATTR_INSTALL_HEIGHT = 4
+ATTR_INSTALL_HEIGHT_MIN = 5
+ATTR_INSTALL_HEIGHT_MAX = 6
+ATTR_INSTALL_STATUS = 7
+ATTR_INSTALL_ANGLE = 8
 ATTR_ZONES = 16
 ATTR_MAX_ZONES = 17
 ATTR_ACTIVITY_STATE = 7
 ATTR_HUMAN_COUNT = 2
 ATTR_ZONE_ID = 1
+ATTR_COORDINATE_REVERSE = 45
+ATTR_DETECTION_DIRECTION = 46
+ATTR_PROXIMITY_LEVEL = 47
+
+INSTALL_MODES = {0: "unknown", 1: "side_mount", 2: "top_mount"}
+SIDE_INSTALLS = {0: "unknown", 1: "wall", 2: "left_corner", 3: "right_corner"}
+COORDINATE_REVERSE = {0: "disabled", 1: "enabled", 2: "auto"}
+DETECTION_DIRECTIONS = {0: "omnidirectional", 1: "left_right"}
+PROXIMITY_LEVELS = {0: "far", 1: "medium", 2: "near"}
+INSTALL_STATUSES = {
+    0: "level_facing_up",
+    1: "level_tilted_facing_up",
+    2: "level_reverse_tilted_facing_up",
+    3: "side_facing_forward",
+    4: "side_reverse_facing_forward",
+    5: "top_facing_down",
+    6: "tilted_facing_down",
+    7: "reverse_tilted_facing_down",
+    8: "invalid",
+}
 
 EVENT_LOCATION_INFO = 0
 EVENT_MOTION_DETECTED = 0

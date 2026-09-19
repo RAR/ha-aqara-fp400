@@ -234,6 +234,25 @@ class FP400Node:
     def _attr(self, endpoint: int, cluster: int, attribute: int) -> Any:
         return self.node.node_data.attributes.get(f"{endpoint}/{cluster}/{attribute}")
 
+    def config_attr(self, attribute: int) -> Any:
+        """Read a cached AmbientSensingConfiguration attribute."""
+        return self._attr(SENSOR_ENDPOINT, CLUSTER_CONFIG, attribute)
+
+    async def async_write_config(self, attribute: int, value: Any) -> None:
+        """Write an AmbientSensingConfiguration attribute and mirror it into the cache."""
+        result = await self.matter_client.send_command(
+            APICommand.WRITE_ATTRIBUTE,
+            node_id=self.node_id,
+            attribute_path=f"{SENSOR_ENDPOINT}/{CLUSTER_CONFIG}/{attribute}",
+            value=value,
+        )
+        for entry in result or []:
+            status = entry.get("Status") if isinstance(entry, dict) else None
+            if status not in (None, 0):
+                raise ValueError(f"device rejected the write (status {status})")
+        self.node.node_data.attributes[f"{SENSOR_ENDPOINT}/{CLUSTER_CONFIG}/{attribute}"] = value
+        self._notify()
+
     # ---- lifecycle -------------------------------------------------------
 
     async def async_start(self) -> None:
