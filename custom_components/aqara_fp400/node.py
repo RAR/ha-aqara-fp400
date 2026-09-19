@@ -150,7 +150,7 @@ def parse_target(raw: Any) -> Target | None:
         row=row,
         col=col,
         activity=ACTIVITY_STATES.get(int(_get(raw, "activityState", 4, default=0) or 0), "unknown"),
-        zone_id=_zone_id(_get(raw, "zoneMask", "zoneId", 8, default=None)),
+        zone_id=_zone_id(_get(raw, "inZoneID", "inZoneId", "zoneMask", 8, default=None)),
     )
 
 
