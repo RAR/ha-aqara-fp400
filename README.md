@@ -6,6 +6,18 @@ the parts the Aqara app does (when it works) that plain Matter does not expose.
 It rides on Home Assistant's Matter integration: same server connection, same fabric, no extra pairing. Entities land
 on a "<device> radar" device linked to the sensor's Matter device.
 
+<p align="center">
+  <img src="docs/zone-card.png" alt="The zone card: sensor at the top, a painted zone with a tracked person in it, the monitoring range outlined" width="360">
+</p>
+
+## Installation
+
+1. Add `https://github.com/RAR/ha-aqara-fp400` as a custom repository in HACS (category: Integration) and install it,
+   or copy `custom_components/aqara_fp400` into your `config/custom_components`.
+2. Restart Home Assistant and add the **Aqara FP400 (Matter)** integration from Settings → Devices & services. It finds
+   every FP400 on the Matter integration by itself.
+3. Add the zone card to a dashboard (see below). The integration registers the card resource itself.
+
 ## Requirements
 
 - Home Assistant 2026.9 or newer with the Matter integration and the FP400 commissioned.
@@ -74,7 +86,7 @@ single-column test zones.
 
 ## Zone card
 
-The integration serves a Lovelace card; add it as a manual card:
+The integration serves a Lovelace card (pictured above); add it as a manual card:
 
 ```yaml
 type: custom:aqara-fp400-zone-card
