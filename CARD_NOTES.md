@@ -31,7 +31,7 @@ Commit + `git push origin main` when happy.
 - Monitoring is already inverted in the BACKEND (the card just paints "the monitored area").
 - Status line: "N tracked · <activity> · <sync>"; sync = saving…/unsaved/verifying…/synced/⚠ error.
 
-## Known design nits to consider in a design pass
+## Design nits addressed in 0.4.0 (kept for history)
 - Zone colors 2/3/4 reuse the region colors (red/green/amber) → a green zone can look like the Entry/Exit
   outline. Consider a zone palette that avoids the three region hues, or distinguish fill vs outline more.
 - Toolbar can get wide with many controls; consider grouping/wrapping.
@@ -39,5 +39,6 @@ Commit + `git push origin main` when happy.
   discover — could be made more obvious.
 - Grid cell borders + region outlines + target dots can get busy; a design pass could calm the visual hierarchy.
 
-Current version: 0.3.4. Commits are on `main` (github.com/RAR/ha-aqara-fp400). Full protocol/verification notes:
+Current version: 0.4.0 (design pass 2026-09-21: segmented layer bar, cool-only zone palette, distance labels,
+shaded area outside monitoring, selected-zone panel with Enable/Disable + Delete, sync pill, footer Save bar). Commits are on `main` (github.com/RAR/ha-aqara-fp400). Full protocol/verification notes:
 `~/fp400/VERIFY_1196.md`, `~/fp400/NOTES.md`; upstream PR handoff `~/fp400/PR_NOTES.md`.

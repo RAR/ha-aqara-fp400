@@ -81,9 +81,11 @@ entity: sensor.aqara_spatial_multi_sensor_fp400_radar_zones
 title: Master bedroom      # optional
 ```
 
-Pick a zone chip, click or drag on the grid to paint it (painting over another zone's cell moves the cell), use `erase`
-to remove cells, double-click a chip to disable that zone, then **Save**. Tracked people are drawn as dots (grey when
-still). Turn on the live tracking switch to see them move.
+Pick a layer at the top (Zones, or one of the three regions), select a zone chip or **Add zone**, then click or drag on
+the grid to paint (painting over another zone's cell moves the cell; **Erase** removes cells from any zone). The panel
+under the chips enables/disables or deletes the selected zone. Regions are drawn as outlines and painted as a fill while
+you edit them. **Save** writes the change to the device. Tracked people are drawn as dots (hollow when still); cells
+outside the monitoring range are shaded. Turn on the live tracking switch to see people move.
 
 ## Development
 

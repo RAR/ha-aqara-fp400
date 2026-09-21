@@ -16,13 +16,16 @@ let ROWS = 20;
 // column 8 is straight ahead of the sensor (x ≈ -25 cm); columns grow as x decreases
 const AHEAD_COL = 8.5 - 25 / 50;
 const CELL_CM = 50;
-const ZONE_COLORS = ["#4f8ef7", "#f75f4f", "#3bbf6a", "#f2b600", "#a35bf7", "#19b5c9", "#f77b1c", "#c9198f"];
+const GUTTER = 1.6; // left gutter (grid units) for the distance labels
+// Cool hues only, so a zone is never mistaken for the green/red/amber region outlines.
+const ZONE_COLORS = ["#4f8ef7", "#a35bf7", "#19b5c9", "#e0409a", "#6e6cf0", "#7fb3ff", "#c084fc", "#ff8ad8"];
 const REGION_KEYS = ["entry_exit", "interference", "monitoring"];
 const REGION_META = {
-  entry_exit: { label: "Entry/Exit", color: "#3bbf6a" },
-  interference: { label: "Interference", color: "#f75f4f" },
-  monitoring: { label: "Monitoring", color: "#f2b600" },
+  entry_exit: { label: "Entry/Exit", color: "#3bbf6a", dash: "", help: "Where people walk in and out. Paint the doorway cells." },
+  interference: { label: "Interference", color: "#f75f4f", dash: "", help: "Things that fool the radar (fans, curtains). Paint them to ignore them." },
+  monitoring: { label: "Monitoring", color: "#f2b600", dash: "0.35 0.25", help: "The area the sensor watches. Cells outside it are ignored." },
 };
+const SVG_NS = "http://www.w3.org/2000/svg";
 
 class AqaraFp400ZoneCard extends HTMLElement {
   static getStubConfig(hass) {
@@ -58,42 +61,96 @@ class AqaraFp400ZoneCard extends HTMLElement {
     root.innerHTML = `
       <style>
         :host { display: block; }
-        ha-card { padding: 12px 16px 16px; }
-        .header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
-        .title { font-size: 1.1em; font-weight: 500; }
-        .status { color: var(--secondary-text-color); font-size: 0.85em; }
-        .modes { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
-        .mode { display: inline-flex; align-items: center; min-height: 34px; box-sizing: border-box; border: 1px solid var(--divider-color, #444); border-radius: 6px; padding: 4px 12px; cursor: pointer; font-size: 0.9em; background: var(--card-background-color); color: var(--primary-text-color); }
-        .mode.active { border-color: var(--primary-text-color); font-weight: 600; }
-        .mode .swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
-        .grid { position: relative; width: 100%; aspect-ratio: ${COLS} / ${ROWS}; touch-action: none; user-select: none; }
+        ha-card { display: block; padding: 16px; container-type: inline-size; }
+        * { box-sizing: border-box; }
+
+        .header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+        .title { font-size: 1.15em; font-weight: 500; line-height: 1.3; }
+        .sub { color: var(--secondary-text-color); font-size: 0.85em; margin-top: 2px; display: flex; align-items: center; gap: 6px; }
+        .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--secondary-text-color); opacity: 0.5; }
+        .live-dot.on { background: #3bbf6a; opacity: 1; box-shadow: 0 0 0 3px rgba(59, 191, 106, 0.25); }
+        .sync { flex: none; font-size: 0.8em; padding: 4px 10px; border-radius: 12px; background: var(--secondary-background-color); color: var(--secondary-text-color); white-space: nowrap; }
+        .sync.dirty { color: #b98300; background: rgba(242, 182, 0, 0.16); }
+        .sync.busy { color: var(--primary-color); }
+        .sync.bad { color: var(--error-color, #db4437); background: rgba(219, 68, 55, 0.14); }
+
+        .layers { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; border-radius: 12px; background: var(--secondary-background-color); margin-bottom: 12px; }
+        .layer { flex: 1 1 0; min-width: 0; min-height: 40px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 8px; border-radius: 9px; cursor: pointer; font-size: 0.88em; color: var(--secondary-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: background 0.15s, color 0.15s; }
+        .layer:hover { color: var(--primary-text-color); }
+        .layer.active { background: var(--card-background-color); color: var(--primary-text-color); font-weight: 600; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18); }
+        .layer .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; }
+        .layer .dot.zones { background: linear-gradient(135deg, #4f8ef7 50%, #a35bf7 50%); }
+        .layer .dot.ring { background: none; border: 2.5px solid currentColor; }
+        @container (max-width: 380px) { .layer { flex-basis: calc(50% - 2px); } }
+
+        .grid { position: relative; width: 100%; aspect-ratio: ${COLS + GUTTER} / ${ROWS}; touch-action: none; user-select: none; border-radius: 10px; background: var(--secondary-background-color); overflow: hidden; }
         svg { width: 100%; height: 100%; display: block; }
-        .cell { stroke: var(--divider-color, #444); stroke-width: 0.03; fill: var(--card-background-color, #1c1c1c); cursor: crosshair; }
-        .cell.painted { fill-opacity: 0.55; }
-        .cell.painted.disabled { fill-opacity: 0.2; }
-        .cell.region-tint { fill-opacity: 0.22; }
+        .cell { stroke: var(--divider-color, rgba(127,127,127,0.3)); stroke-width: 0.025; fill: var(--primary-text-color); fill-opacity: 0; cursor: crosshair; transition: fill-opacity 0.1s; }
+        .cell.outside { fill-opacity: 0.07; }
+        .cell.painted { fill-opacity: 0.6; }
+        .cell.painted.disabled { fill-opacity: 0.18; }
+        .cell.region-tint { fill-opacity: 0.16; }
+        .cell.region-fill { fill-opacity: 0.45; }
+        .cell.hover-zone:hover { fill-opacity: 0.35; }
+        .gridline { stroke: var(--primary-text-color); stroke-opacity: 0.12; stroke-width: 0.04; }
+        .ahead { stroke: var(--primary-text-color); stroke-opacity: 0.12; stroke-width: 0.04; stroke-dasharray: 0.3 0.3; }
+        .label { fill: var(--secondary-text-color); font-size: 0.55px; font-family: inherit; }
         .sensor { fill: var(--primary-text-color); }
-        .target { fill: #fff; stroke: #000; stroke-width: 0.06; }
-        .target.still { fill: #bbb; }
-        .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
-        .chip { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 40px; min-height: 40px; border: 2px solid transparent; border-radius: 20px; padding: 6px 14px; cursor: pointer; font-size: 0.95em; color: #fff; opacity: 0.6; }
-        .chip.active { border-color: var(--primary-text-color); opacity: 1; }
-        .chip.erase { background: #555; }
-        .spacer { flex: 1; }
-        mwc-button, button { font: inherit; }
-        button { background: var(--primary-color); color: var(--text-primary-color, #fff); border: 0; border-radius: 6px; padding: 9px 16px; min-height: 40px; cursor: pointer; }
+        .sensor-halo { fill: var(--primary-text-color); fill-opacity: 0.08; }
+        .region-outline { fill: none; stroke-width: 0.16; stroke-linecap: square; stroke-linejoin: round; }
+        .region-outline.dim { stroke-opacity: 0.55; }
+        .target { fill: var(--primary-color); stroke: var(--card-background-color, #fff); stroke-width: 0.1; }
+        .target.still { fill: var(--card-background-color, #fff); stroke: var(--primary-color); stroke-width: 0.12; }
+        .target-halo { fill: var(--primary-color); fill-opacity: 0.18; }
+
+        .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+        .chip { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 6px 14px 6px 10px; border-radius: 20px; cursor: pointer; font-size: 0.92em; border: 2px solid transparent; background: var(--secondary-background-color); color: var(--primary-text-color); transition: border-color 0.15s, background 0.15s; }
+        .chip:hover { border-color: var(--divider-color); }
+        .chip .dot { width: 14px; height: 14px; border-radius: 50%; }
+        .chip .n { color: var(--secondary-text-color); font-size: 0.85em; }
+        .chip.active { border-color: var(--primary-text-color); }
+        .chip.active .n { color: inherit; }
+        .chip.new { border-style: dashed; border-color: var(--divider-color); }
+        .chip.new.active { border-color: var(--primary-text-color); }
+        .chip.new .dot { opacity: 0.5; }
+        .chip.erase .dot { background: none; border: 2px solid currentColor; opacity: 0.5; }
+
+        .panel { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--divider-color); font-size: 0.9em; }
+        .panel:empty { display: none; }
+        .panel .name { font-weight: 600; display: inline-flex; align-items: center; gap: 8px; }
+        .panel .name .dot { width: 12px; height: 12px; border-radius: 50%; }
+        .panel .meta { color: var(--secondary-text-color); }
+        .panel .spacer { flex: 1; min-width: 8px; }
+        .panel.region { border-left: 4px solid; }
+        .panel .btns { display: flex; gap: 8px; flex: none; }
+
+        button { font: inherit; background: var(--primary-color); color: var(--text-primary-color, #fff); border: 0; border-radius: 8px; padding: 8px 16px; min-height: 40px; cursor: pointer; font-size: 0.92em; }
         button.secondary { background: var(--secondary-background-color); color: var(--primary-text-color); }
+        button.ghost { background: transparent; color: var(--primary-text-color); border: 1px solid var(--divider-color); }
         button.danger { color: var(--error-color, #db4437); }
         button:disabled { opacity: 0.4; cursor: default; }
-        .hint { color: var(--secondary-text-color); font-size: 0.8em; margin-top: 6px; }
-        .error { color: var(--error-color); font-size: 0.85em; margin-top: 6px; }
+        button.small { min-height: 34px; padding: 6px 12px; font-size: 0.86em; }
+
+        .footer { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--divider-color); }
+        .footer .hint { flex: 1; color: var(--secondary-text-color); font-size: 0.82em; line-height: 1.35; }
+        .footer.dirty .hint { color: var(--primary-text-color); }
+        .footer .actions { display: flex; gap: 8px; flex: none; }
+        .error { color: var(--error-color); font-size: 0.85em; margin-top: 8px; }
+        .error:empty { display: none; }
       </style>
       <ha-card>
-        <div class="header"><span class="title"></span><span class="status"></span></div>
-        <div class="modes"></div>
-        <div class="grid"><svg viewBox="0 0 ${COLS} ${ROWS}" preserveAspectRatio="none"></svg></div>
-        <div class="toolbar"></div>
-        <div class="hint"></div>
+        <div class="header">
+          <div>
+            <div class="title"></div>
+            <div class="sub"><span class="live-dot"></span><span class="sub-text"></span></div>
+          </div>
+          <span class="sync"></span>
+        </div>
+        <div class="layers"></div>
+        <div class="grid"><svg></svg></div>
+        <div class="tools"></div>
+        <div class="panel"></div>
+        <div class="footer"><span class="hint"></span><span class="actions"></span></div>
         <div class="error"></div>
       </ha-card>`;
     this._svg = root.querySelector("svg");
@@ -103,35 +160,56 @@ class AqaraFp400ZoneCard extends HTMLElement {
     grid.addEventListener("pointerdown", (ev) => this._onPointer(ev, true));
     grid.addEventListener("pointermove", (ev) => this._onPointer(ev, false));
     grid.addEventListener("pointerup", () => (this._pointerDown = false));
+    grid.addEventListener("pointercancel", () => (this._pointerDown = false));
     grid.addEventListener("pointerleave", () => (this._pointerDown = false));
+  }
+
+  _el(tag, attrs = {}, cls = "") {
+    const el = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    if (cls) el.setAttribute("class", cls);
+    return el;
   }
 
   _buildGrid() {
     this._gridDims = `${COLS}x${ROWS}`;
     this._svg.innerHTML = "";
-    this._svg.setAttribute("viewBox", `0 0 ${COLS} ${ROWS}`);
-    this.shadowRoot.querySelector(".grid").style.aspectRatio = `${COLS} / ${ROWS}`;
+    this._svg.setAttribute("viewBox", `${-GUTTER} 0 ${COLS + GUTTER} ${ROWS}`);
+    this.shadowRoot.querySelector(".grid").style.aspectRatio = `${COLS + GUTTER} / ${ROWS}`;
+
+    // distance labels + guide lines every metre (2 rows), and the straight-ahead line
+    const guides = this._el("g");
+    for (let r = 2; r < ROWS; r += 2) {
+      const y = ROWS - r;
+      guides.appendChild(this._el("line", { x1: 0, y1: y, x2: COLS, y2: y }, "gridline"));
+      const t = this._el("text", { x: -0.25, y: y + 0.2, "text-anchor": "end" }, "label");
+      t.textContent = `${r / 2} m`;
+      guides.appendChild(t);
+    }
+    guides.appendChild(this._el("line", { x1: AHEAD_COL, y1: 0, x2: AHEAD_COL, y2: ROWS }, "ahead"));
+    this._svg.appendChild(guides);
+
     this._cells = [];
+    const cellLayer = this._el("g");
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
-        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-        rect.setAttribute("x", c);
-        rect.setAttribute("y", ROWS - 1 - r); // row 0 nearest the sensor = bottom
-        rect.setAttribute("width", 1);
-        rect.setAttribute("height", 1);
-        rect.classList.add("cell");
+        const rect = this._el("rect", { x: c, y: ROWS - 1 - r, width: 1, height: 1 }, "cell"); // row 0 nearest the sensor = bottom
         rect.dataset.index = r * COLS + c;
-        this._svg.appendChild(rect);
+        cellLayer.appendChild(rect);
         this._cells.push(rect);
       }
     }
-    const sensor = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    sensor.setAttribute("d", `M ${AHEAD_COL - 0.6} ${ROWS} L ${AHEAD_COL} ${ROWS - 0.7} L ${AHEAD_COL + 0.6} ${ROWS} Z`);
-    sensor.classList.add("sensor");
-    this._svg.appendChild(sensor);
-    this._regionLayer = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    this._svg.appendChild(cellLayer);
+
+    this._regionLayer = this._el("g");
     this._svg.appendChild(this._regionLayer);
-    this._targetLayer = document.createElementNS("http://www.w3.org/2000/svg", "g");
+
+    const sensor = this._el("g");
+    sensor.appendChild(this._el("circle", { cx: AHEAD_COL, cy: ROWS, r: 1.4 }, "sensor-halo"));
+    sensor.appendChild(this._el("path", { d: `M ${AHEAD_COL - 0.55} ${ROWS} L ${AHEAD_COL} ${ROWS - 0.65} L ${AHEAD_COL + 0.55} ${ROWS} Z` }, "sensor"));
+    this._svg.appendChild(sensor);
+
+    this._targetLayer = this._el("g");
     this._svg.appendChild(this._targetLayer);
   }
 
@@ -196,6 +274,14 @@ class AqaraFp400ZoneCard extends HTMLElement {
     return this._hass?.entities?.[this._config.entity]?.device_id;
   }
 
+  _maxZones() {
+    return this._hass?.states[this._config.entity]?.attributes?.max_zones || 8;
+  }
+
+  _zoneColor(id) {
+    return ZONE_COLORS[(id - 1) % ZONE_COLORS.length];
+  }
+
   // ---------------------------------------------------------------- render
 
   _render() {
@@ -212,62 +298,71 @@ class AqaraFp400ZoneCard extends HTMLElement {
     root.querySelector(".title").textContent = this._config.title || state?.attributes?.friendly_name?.replace(/ Zones$/, "") || "FP400";
     const targetsState = this._hass.states[this._targetsEntity()];
     const targets = targetsState?.attributes?.targets || [];
-    const live = targetsState?.attributes?.live_tracking;
-    root.querySelector(".status").textContent = state
-      ? `${targets.length} tracked · ${targetsState?.attributes?.activity_state || "?"}${live ? " · live" : ""} · ${this._syncLabel(state)}`
+    const live = !!targetsState?.attributes?.live_tracking;
+    root.querySelector(".live-dot").classList.toggle("on", live);
+    const activity = targetsState?.attributes?.activity_state;
+    root.querySelector(".sub-text").textContent = state
+      ? `${targets.length === 1 ? "1 person" : `${targets.length} people`}${activity && activity !== "unknown" ? ` · ${activity}` : ""}${live ? " · live" : " · live tracking off"}`
       : "entity not found";
+    this._renderSync(state);
 
     const zones = this._zones();
     const regions = this._regions();
     const editingRegion = this._mode !== "zones" ? this._mode : null;
+    const monitored = regions.monitoring;
+    const shadeOutside = monitored.size > 0 && editingRegion !== "monitoring";
 
     const owner = new Array(ROWS * COLS).fill(null);
     for (const [id, zone] of zones) for (const idx of zone.cells) owner[idx] = id;
 
     this._cells.forEach((rect, idx) => {
-      rect.classList.remove("painted", "disabled", "region-tint");
+      rect.setAttribute("class", "cell");
       rect.style.fill = "";
       const zoneId = owner[idx];
       if (editingRegion && regions[editingRegion].has(idx)) {
-        rect.classList.add("painted");
+        rect.classList.add("region-fill");
         rect.style.fill = REGION_META[editingRegion].color;
       } else if (zoneId !== null) {
         rect.classList.add(editingRegion ? "region-tint" : "painted");
         if (!editingRegion) rect.classList.toggle("disabled", zones.get(zoneId).enabled === false);
-        rect.style.fill = ZONE_COLORS[(zoneId - 1) % ZONE_COLORS.length];
+        rect.style.fill = this._zoneColor(zoneId);
+      } else if (shadeOutside && !monitored.has(idx)) {
+        rect.classList.add("outside");
+      }
+      if (!editingRegion && this._active > 0 && zoneId === null && !rect.classList.contains("outside")) {
+        rect.classList.add("hover-zone");
+        rect.style.fill = this._zoneColor(this._active);
       }
     });
 
     // regions are drawn as a single outline around their area (the edited one is solid, above)
     this._regionLayer.innerHTML = "";
     for (const key of REGION_KEYS) {
-      if (key === editingRegion) continue;
-      this._regionLayer.appendChild(this._regionOutline(regions[key], REGION_META[key].color));
+      if (key === editingRegion || regions[key].size === 0) continue;
+      const path = this._regionOutline(regions[key], REGION_META[key]);
+      if (editingRegion) path.classList.add("dim");
+      this._regionLayer.appendChild(path);
     }
 
     this._targetLayer.innerHTML = "";
     for (const t of targets) {
-      const u = AHEAD_COL - t.x / CELL_CM;
-      const v = ROWS - t.y / CELL_CM;
-      const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-      dot.setAttribute("cx", Math.min(COLS - 0.3, Math.max(0.3, u)));
-      dot.setAttribute("cy", Math.min(ROWS - 0.3, Math.max(0.3, v)));
-      dot.setAttribute("r", 0.35);
-      dot.classList.add("target");
-      if (t.activity === "still") dot.classList.add("still");
-      dot.innerHTML = `<title>target ${t.id}: x ${t.x} cm, y ${t.y} cm, ${t.activity}${t.zones?.length ? ", zones " + t.zones.join(",") : ""}</title>`;
+      const cx = Math.min(COLS - 0.3, Math.max(0.3, AHEAD_COL - t.x / CELL_CM));
+      const cy = Math.min(ROWS - 0.3, Math.max(0.3, ROWS - t.y / CELL_CM));
+      const still = t.activity === "still";
+      if (!still) this._targetLayer.appendChild(this._el("circle", { cx, cy, r: 0.7 }, "target-halo"));
+      const dot = this._el("circle", { cx, cy, r: 0.36 }, "target" + (still ? " still" : ""));
+      const title = this._el("title");
+      title.textContent = `Person ${t.id}: ${(t.y / 100).toFixed(1)} m ahead, ${Math.abs(t.x / 100).toFixed(1)} m ${t.x < 0 ? "right" : "left"}, ${t.activity}${t.zones?.length ? ", in zone " + t.zones.join(", ") : ""}`;
+      dot.appendChild(title);
       this._targetLayer.appendChild(dot);
     }
 
-    this._renderModes();
-    this._renderToolbar(zones, regions, state);
-    root.querySelector(".hint").textContent = editingRegion
-      ? `Editing the ${REGION_META[editingRegion].label} region. Click or drag to add cells, drag from a filled cell to erase, then Save.`
-      : `Cells are ~50 cm; the sensor is the triangle at the bottom. Click or drag to paint the selected zone, double-click a zone chip to disable it, then Save.`;
+    this._renderLayers(zones, regions);
+    this._renderTools(zones, regions, state);
   }
 
   // an SVG path tracing the perimeter of a set of cells (boundary edges only)
-  _regionOutline(cells, color) {
+  _regionOutline(cells, meta) {
     const has = (r, c) => r >= 0 && r < ROWS && c >= 0 && c < COLS && cells.has(r * COLS + c);
     const seg = [];
     for (const idx of cells) {
@@ -280,98 +375,134 @@ class AqaraFp400ZoneCard extends HTMLElement {
       if (!has(r, c - 1)) seg.push(`M ${c} ${yTop} L ${c} ${yBot}`);
       if (!has(r, c + 1)) seg.push(`M ${c + 1} ${yTop} L ${c + 1} ${yBot}`);
     }
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", seg.join(" "));
-    path.setAttribute("fill", "none");
-    path.setAttribute("stroke", color);
-    path.setAttribute("stroke-width", 0.16);
-    path.setAttribute("stroke-linecap", "square");
-    return path;
+    const attrs = { d: seg.join(" "), stroke: meta.color };
+    if (meta.dash) attrs["stroke-dasharray"] = meta.dash;
+    return this._el("path", attrs, "region-outline");
   }
 
-  _syncLabel(state) {
-    if (this._saving) return "saving…";
-    const dirty = this._mode === "zones" ? this._edit : this._regionEdit && this._regionEdit.key === this._mode;
-    if (dirty) return "unsaved";
-    if (this._mode === "zones") {
-      if (state?.attributes?.pending) return "verifying…";
-      if (state?.attributes?.error) return "⚠ " + state.attributes.error;
-      return "synced";
+  _renderSync(state) {
+    const el = this.shadowRoot.querySelector(".sync");
+    let text = "Synced";
+    let cls = "";
+    const dirty = this._mode === "zones" ? !!this._edit : !!(this._regionEdit && this._regionEdit.key === this._mode);
+    if (this._saving) {
+      text = "Saving…";
+      cls = "busy";
+    } else if (dirty) {
+      text = "Unsaved changes";
+      cls = "dirty";
+    } else if (this._mode === "zones") {
+      if (state?.attributes?.pending) [text, cls] = ["Verifying…", "busy"];
+      else if (state?.attributes?.error) [text, cls] = ["Error: " + state.attributes.error, "bad"];
+    } else {
+      const rstate = this._hass.states[this._regionsEntity()]?.attributes;
+      if (rstate?.pending?.[this._mode]) [text, cls] = ["Verifying…", "busy"];
+      else if (rstate?.error?.[this._mode]) [text, cls] = ["Error: " + rstate.error[this._mode], "bad"];
     }
-    const rstate = this._hass.states[this._regionsEntity()]?.attributes;
-    if (rstate?.pending?.[this._mode]) return "verifying…";
-    if (rstate?.error?.[this._mode]) return "⚠ " + rstate.error[this._mode];
-    return "synced";
+    el.textContent = text;
+    el.className = "sync " + cls;
   }
 
-  _renderModes() {
-    const bar = this.shadowRoot.querySelector(".modes");
+  _renderLayers(zones, regions) {
+    const bar = this.shadowRoot.querySelector(".layers");
     bar.innerHTML = "";
-    const mk = (key, label, color) => {
+    const mk = (key, label, dotHtml, tip) => {
       const b = document.createElement("span");
-      b.className = "mode" + (this._mode === key ? " active" : "");
-      b.innerHTML = (color ? `<span class="swatch" style="background:${color}"></span>` : "") + label;
+      b.className = "layer" + (this._mode === key ? " active" : "");
+      b.innerHTML = dotHtml + `<span>${label}</span>`;
+      b.title = tip;
       b.addEventListener("click", () => {
         if (this._mode === key) return;
         this._mode = key;
-        if (key === "zones") this._active = 1;
+        if (key === "zones" && !zones.has(this._active)) this._active = [...zones.keys()].sort((a, b) => a - b)[0] || 1;
         this._render();
       });
       bar.appendChild(b);
     };
-    mk("zones", "Zones", null);
-    for (const key of REGION_KEYS) mk(key, REGION_META[key].label, REGION_META[key].color);
+    mk("zones", `Zones${zones.size ? ` (${zones.size})` : ""}`, `<span class="dot zones"></span>`, "Detection zones — each one becomes an occupancy sensor");
+    for (const key of REGION_KEYS) {
+      const m = REGION_META[key];
+      mk(key, m.label, `<span class="dot ring" style="color:${m.color}${regions[key].size ? "" : ";opacity:0.4"}"></span>`, m.help);
+    }
   }
 
-  _renderToolbar(zones, regions, state) {
-    const bar = this.shadowRoot.querySelector(".toolbar");
-    bar.innerHTML = "";
-    if (this._mode === "zones") this._zoneToolbar(bar, zones, state);
-    else this._regionToolbar(bar, regions);
+  _renderTools(zones, regions, state) {
+    const tools = this.shadowRoot.querySelector(".tools");
+    const panel = this.shadowRoot.querySelector(".panel");
+    tools.innerHTML = "";
+    panel.innerHTML = "";
+    panel.className = "panel";
+    panel.style.borderLeftColor = "";
+    if (this._mode === "zones") this._zoneTools(tools, panel, zones, state);
+    else this._regionTools(tools, panel, regions);
   }
 
-  _zoneToolbar(bar, zones, state) {
+  _zoneTools(tools, panel, zones, state) {
     const max = state?.attributes?.max_zones || 8;
     // show a chip only for zones that exist, plus the empty one currently being added
     const ids = [...zones.keys()].sort((a, b) => a - b);
-    if (this._active > 0 && !zones.has(this._active)) ids.push(this._active);
+    const adding = this._active > 0 && !zones.has(this._active);
+    if (adding) ids.push(this._active);
     for (const id of ids) {
+      const exists = zones.has(id);
       const chip = document.createElement("span");
-      chip.className = "chip" + (this._active === id ? " active" : "");
-      chip.style.background = ZONE_COLORS[(id - 1) % ZONE_COLORS.length];
-      chip.textContent = `${id}${zones.has(id) ? ` (${zones.get(id).cells.size})` : ""}`;
-      chip.title = zones.has(id) ? "double-click to toggle enabled" : "new zone — paint to add cells";
+      chip.className = "chip" + (this._active === id ? " active" : "") + (exists ? "" : " new");
+      const disabled = exists && zones.get(id).enabled === false;
+      chip.innerHTML = `<span class="dot" style="background:${this._zoneColor(id)}"></span><span>Zone ${id}</span>` + (exists ? `<span class="n">${disabled ? "off" : zones.get(id).cells.size}</span>` : "");
+      chip.title = exists ? `Select zone ${id} to paint it` : "New zone — paint cells on the grid";
       chip.addEventListener("click", () => { this._active = id; this._render(); });
-      chip.addEventListener("dblclick", () => this._toggleEnabled(id));
-      bar.appendChild(chip);
+      tools.appendChild(chip);
     }
-    if (ids.length) {
+    if (zones.size) {
       const erase = document.createElement("span");
       erase.className = "chip erase" + (this._active === 0 ? " active" : "");
-      erase.textContent = "erase";
-      erase.title = "drag to remove cells from any zone";
+      erase.innerHTML = `<span class="dot"></span><span>Erase</span>`;
+      erase.title = "Drag over cells to remove them from any zone";
       erase.addEventListener("click", () => { this._active = 0; this._render(); });
-      bar.appendChild(erase);
+      tools.appendChild(erase);
+    }
+    const nextId = this._freeZoneId(zones, max);
+    if (!adding) {
+      const add = document.createElement("button");
+      add.className = "ghost";
+      add.textContent = "+ Add zone";
+      add.disabled = !nextId || this._saving;
+      add.title = nextId ? "" : `All ${max} zones are in use`;
+      add.addEventListener("click", () => { this._active = nextId; this._render(); });
+      tools.appendChild(add);
     }
 
-    const nextId = this._freeZoneId(zones, max);
-    const add = document.createElement("button");
-    add.className = "secondary";
-    add.textContent = "+ Add zone";
-    add.disabled = !nextId || this._saving;
-    add.addEventListener("click", () => { this._active = nextId; this._render(); });
-    bar.appendChild(add);
-
+    // detail panel for the selected zone
     if (zones.has(this._active)) {
+      const zone = zones.get(this._active);
+      panel.innerHTML = `<span class="name"><span class="dot" style="background:${this._zoneColor(this._active)}"></span>Zone ${this._active}</span>
+        <span class="meta">${zone.cells.size} cells · ${zone.enabled ? "enabled" : "disabled"}</span><span class="spacer"></span>`;
+      const group = document.createElement("span");
+      group.className = "btns";
+      const toggle = document.createElement("button");
+      toggle.className = "secondary small";
+      toggle.textContent = zone.enabled ? "Disable" : "Enable";
+      toggle.disabled = this._saving;
+      toggle.addEventListener("click", () => this._toggleEnabled(this._active));
+      group.appendChild(toggle);
       const del = document.createElement("button");
-      del.className = "secondary danger";
-      del.textContent = `Delete zone ${this._active}`;
+      del.className = "secondary small danger";
+      del.textContent = "Delete";
       del.disabled = this._saving;
       del.addEventListener("click", () => this._deleteZone(this._active));
-      bar.appendChild(del);
+      group.appendChild(del);
+      panel.appendChild(group);
+    } else if (adding) {
+      panel.innerHTML = `<span class="name"><span class="dot" style="background:${this._zoneColor(this._active)}"></span>New zone ${this._active}</span>
+        <span class="meta">paint cells on the grid to create it</span>`;
+    } else if (this._active === 0) {
+      panel.innerHTML = `<span class="name">Erase</span><span class="meta">drag over cells to remove them from any zone</span>`;
     }
 
-    this._actionButtons(bar, !!this._edit, () => { this._edit = null; this._render(); }, () => this._save());
+    const hint = zones.size || adding
+      ? "Click or drag on the grid to paint the selected zone. Painting over another zone moves those cells."
+      : "No zones yet. Each zone becomes its own occupancy sensor in Home Assistant.";
+    this._actionButtons(hint, !!this._edit, () => { this._edit = null; this._render(); }, () => this._save());
   }
 
   _freeZoneId(zones, max) {
@@ -386,46 +517,43 @@ class AqaraFp400ZoneCard extends HTMLElement {
     this._render();
   }
 
-  _maxZones() {
-    return this._hass?.states[this._config.entity]?.attributes?.max_zones || 8;
-  }
-
-  _regionToolbar(bar, regions) {
+  _regionTools(tools, panel, regions) {
     const key = this._mode;
+    const meta = REGION_META[key];
     const count = regions[key].size;
-    const label = document.createElement("span");
-    label.className = "chip active";
-    label.style.background = REGION_META[key].color;
-    label.textContent = `${REGION_META[key].label} (${count})`;
-    bar.appendChild(label);
-
+    panel.className = "panel region";
+    panel.style.borderLeftColor = meta.color;
+    panel.innerHTML = `<span class="name">${meta.label}</span><span class="meta">${count ? `${count} cells` : "not set"} · ${meta.help}</span><span class="spacer"></span>`;
     const clear = document.createElement("button");
-    clear.className = "secondary";
+    clear.className = "secondary small";
     clear.textContent = "Clear";
-    clear.disabled = this._saving;
+    clear.disabled = this._saving || count === 0;
     clear.addEventListener("click", () => { this._startRegionEdit(key).clear(); this._render(); });
-    bar.appendChild(clear);
+    panel.appendChild(clear);
 
-    this._actionButtons(bar, !!(this._regionEdit && this._regionEdit.key === key), () => { this._regionEdit = null; this._render(); }, () => this._saveRegion());
+    const dirty = !!(this._regionEdit && this._regionEdit.key === key);
+    this._actionButtons("Click or drag on the grid to add cells; drag from a filled cell to remove.", dirty, () => { this._regionEdit = null; this._render(); }, () => this._saveRegion());
   }
 
-  _actionButtons(bar, dirty, onRevert, onSave) {
-    const spacer = document.createElement("span");
-    spacer.className = "spacer";
-    bar.appendChild(spacer);
+  _actionButtons(hint, dirty, onRevert, onSave) {
+    const footer = this.shadowRoot.querySelector(".footer");
+    footer.classList.toggle("dirty", dirty);
+    footer.querySelector(".hint").textContent = dirty ? "You have unsaved changes." : hint;
+    const actions = footer.querySelector(".actions");
+    actions.innerHTML = "";
 
     const revert = document.createElement("button");
-    revert.className = "secondary";
+    revert.className = "ghost";
     revert.textContent = "Revert";
     revert.disabled = !dirty || this._saving;
     revert.addEventListener("click", onRevert);
-    bar.appendChild(revert);
+    actions.appendChild(revert);
 
     const save = document.createElement("button");
     save.textContent = this._saving ? "Saving…" : "Save";
     save.disabled = !dirty || this._saving;
     save.addEventListener("click", onSave);
-    bar.appendChild(save);
+    actions.appendChild(save);
   }
 
   // ---------------------------------------------------------------- editing
