@@ -356,8 +356,20 @@ class AqaraFp400ZoneCard extends HTMLElement {
       this._targetLayer.appendChild(dot);
     }
 
-    this._renderLayers(zones, regions);
-    this._renderTools(zones, regions, state);
+    // Rebuild the controls only when their inputs change: hass updates arrive several times a
+    // second while live tracking is on, and replacing a button between mousedown and mouseup
+    // swallows the click.
+    const key = JSON.stringify([
+      this._mode, this._active, !!this._saving, !!this._edit, this._regionEdit?.key,
+      [...zones].map(([id, z]) => [id, z.cells.size, z.enabled]),
+      REGION_KEYS.map((k) => regions[k].size),
+      state?.attributes?.max_zones,
+    ]);
+    if (key !== this._controlsKey) {
+      this._controlsKey = key;
+      this._renderLayers(zones, regions);
+      this._renderTools(zones, regions, state);
+    }
   }
 
   // an SVG path tracing the perimeter of a set of cells (boundary edges only)
