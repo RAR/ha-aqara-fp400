@@ -80,6 +80,7 @@ The integration serves a Lovelace card; add it as a manual card:
 type: custom:aqara-fp400-zone-card
 entity: sensor.aqara_spatial_multi_sensor_fp400_radar_zones
 title: Master bedroom      # optional
+sensor_at: top             # optional; top (like the Aqara app) or bottom
 ```
 
 Pick a layer at the top (Zones, or one of the three regions), select a zone chip or **Add zone**, then click or drag on

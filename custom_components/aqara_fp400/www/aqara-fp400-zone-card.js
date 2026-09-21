@@ -8,6 +8,7 @@
  *   regions_entity: sensor.<device>_regions (optional; derived from `entity` when omitted)
  *   targets_entity: sensor.<device>_tracked_people   (optional; derived from `entity` when omitted)
  *   title: Living room                      (optional)
+ *   sensor_at: top | bottom                 (optional; default top, like the Aqara app)
  */
 
 // Defaults; the Zones sensor reports grid_cols/grid_rows and the card follows those.
@@ -36,6 +37,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
   setConfig(config) {
     if (!config.entity) throw new Error("entity (the Zones sensor) is required");
     this._config = config;
+    this._top = config.sensor_at !== "bottom"; // sensor drawn at the top, room extends downward (as in the Aqara app)
     this._mode = "zones"; // "zones" or a REGION_KEYS entry
     this._edit = null; // zones edit: Map<id, {cells:Set, enabled, type}>
     this._regionEdit = null; // region edit: {key, cells:Set}
@@ -171,6 +173,16 @@ class AqaraFp400ZoneCard extends HTMLElement {
     return el;
   }
 
+  // y of a row's top edge in the SVG: row 0 is nearest the sensor, at the top (default) or the bottom
+  _rowY(r) {
+    return this._top ? r : ROWS - 1 - r;
+  }
+
+  // y of a distance from the sensor in cm
+  _distY(cm) {
+    return this._top ? cm / CELL_CM : ROWS - cm / CELL_CM;
+  }
+
   _buildGrid() {
     this._gridDims = `${COLS}x${ROWS}`;
     this._svg.innerHTML = "";
@@ -180,7 +192,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
     // distance labels + guide lines every metre (2 rows), and the straight-ahead line
     const guides = this._el("g");
     for (let r = 2; r < ROWS; r += 2) {
-      const y = ROWS - r;
+      const y = this._distY(r * CELL_CM);
       guides.appendChild(this._el("line", { x1: 0, y1: y, x2: COLS, y2: y }, "gridline"));
       const t = this._el("text", { x: -0.25, y: y + 0.2, "text-anchor": "end" }, "label");
       t.textContent = `${r / 2} m`;
@@ -193,7 +205,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
     const cellLayer = this._el("g");
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
-        const rect = this._el("rect", { x: c, y: ROWS - 1 - r, width: 1, height: 1 }, "cell"); // row 0 nearest the sensor = bottom
+        const rect = this._el("rect", { x: c, y: this._rowY(r), width: 1, height: 1 }, "cell");
         rect.dataset.index = r * COLS + c;
         cellLayer.appendChild(rect);
         this._cells.push(rect);
@@ -205,8 +217,10 @@ class AqaraFp400ZoneCard extends HTMLElement {
     this._svg.appendChild(this._regionLayer);
 
     const sensor = this._el("g");
-    sensor.appendChild(this._el("circle", { cx: AHEAD_COL, cy: ROWS, r: 1.4 }, "sensor-halo"));
-    sensor.appendChild(this._el("path", { d: `M ${AHEAD_COL - 0.55} ${ROWS} L ${AHEAD_COL} ${ROWS - 0.65} L ${AHEAD_COL + 0.55} ${ROWS} Z` }, "sensor"));
+    const sy = this._top ? 0 : ROWS; // sensor edge
+    const tip = this._top ? 0.65 : ROWS - 0.65; // triangle points into the room
+    sensor.appendChild(this._el("circle", { cx: AHEAD_COL, cy: sy, r: 1.4 }, "sensor-halo"));
+    sensor.appendChild(this._el("path", { d: `M ${AHEAD_COL - 0.55} ${sy} L ${AHEAD_COL} ${tip} L ${AHEAD_COL + 0.55} ${sy} Z` }, "sensor"));
     this._svg.appendChild(sensor);
 
     this._targetLayer = this._el("g");
@@ -347,7 +361,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
     this._targetLayer.innerHTML = "";
     for (const t of targets) {
       const cx = Math.min(COLS - 0.3, Math.max(0.3, AHEAD_COL - t.x / CELL_CM));
-      const cy = Math.min(ROWS - 0.3, Math.max(0.3, ROWS - t.y / CELL_CM));
+      const cy = Math.min(ROWS - 0.3, Math.max(0.3, this._distY(t.y)));
       const still = t.activity === "still";
       if (!still) this._targetLayer.appendChild(this._el("circle", { cx, cy, r: 0.7 }, "target-halo"));
       const dot = this._el("circle", { cx, cy, r: 0.36 }, "target" + (still ? " still" : ""));
@@ -380,10 +394,11 @@ class AqaraFp400ZoneCard extends HTMLElement {
     for (const idx of cells) {
       const r = Math.floor(idx / COLS);
       const c = idx % COLS;
-      const yTop = ROWS - 1 - r;
-      const yBot = ROWS - r;
-      if (!has(r + 1, c)) seg.push(`M ${c} ${yTop} L ${c + 1} ${yTop}`); // toward the sensor-far side
-      if (!has(r - 1, c)) seg.push(`M ${c} ${yBot} L ${c + 1} ${yBot}`);
+      const yTop = this._rowY(r);
+      const yBot = yTop + 1;
+      const [yNear, yFar] = this._top ? [yTop, yBot] : [yBot, yTop]; // edges toward / away from the sensor
+      if (!has(r + 1, c)) seg.push(`M ${c} ${yFar} L ${c + 1} ${yFar}`);
+      if (!has(r - 1, c)) seg.push(`M ${c} ${yNear} L ${c + 1} ${yNear}`);
       if (!has(r, c - 1)) seg.push(`M ${c} ${yTop} L ${c} ${yBot}`);
       if (!has(r, c + 1)) seg.push(`M ${c + 1} ${yTop} L ${c + 1} ${yBot}`);
     }
