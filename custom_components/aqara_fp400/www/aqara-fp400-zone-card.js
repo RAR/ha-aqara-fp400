@@ -121,7 +121,6 @@ class AqaraFp400ZoneCard extends HTMLElement {
         .panel .name .dot { width: 12px; height: 12px; border-radius: 50%; }
         .panel .meta { color: var(--secondary-text-color); }
         .panel .spacer { flex: 1; min-width: 8px; }
-        .panel.region { border-left: 4px solid; }
         .panel .btns { display: flex; gap: 8px; flex: none; }
 
         button { font: inherit; background: var(--primary-color); color: var(--text-primary-color, #fff); border: 0; border-radius: 8px; padding: 8px 16px; min-height: 40px; cursor: pointer; font-size: 0.92em; }
@@ -432,7 +431,6 @@ class AqaraFp400ZoneCard extends HTMLElement {
     tools.innerHTML = "";
     panel.innerHTML = "";
     panel.className = "panel";
-    panel.style.borderLeftColor = "";
     if (this._mode === "zones") this._zoneTools(tools, panel, zones, state);
     else this._regionTools(tools, panel, regions);
   }
@@ -521,9 +519,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
     const key = this._mode;
     const meta = REGION_META[key];
     const count = regions[key].size;
-    panel.className = "panel region";
-    panel.style.borderLeftColor = meta.color;
-    panel.innerHTML = `<span class="name">${meta.label}</span><span class="meta">${count ? `${count} cells` : "not set"} · ${meta.help}</span><span class="spacer"></span>`;
+    panel.innerHTML = `<span class="name"><span class="dot" style="background:${meta.color}"></span>${meta.label}</span><span class="meta">${count ? `${count} cells` : "not set"} · ${meta.help}</span><span class="spacer"></span>`;
     const clear = document.createElement("button");
     clear.className = "secondary small";
     clear.textContent = "Clear";
