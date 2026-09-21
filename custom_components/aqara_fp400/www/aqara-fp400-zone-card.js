@@ -63,7 +63,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
         .title { font-size: 1.1em; font-weight: 500; }
         .status { color: var(--secondary-text-color); font-size: 0.85em; }
         .modes { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
-        .mode { border: 1px solid var(--divider-color, #444); border-radius: 4px; padding: 3px 10px; cursor: pointer; font-size: 0.85em; background: var(--card-background-color); color: var(--primary-text-color); }
+        .mode { display: inline-flex; align-items: center; min-height: 34px; box-sizing: border-box; border: 1px solid var(--divider-color, #444); border-radius: 6px; padding: 4px 12px; cursor: pointer; font-size: 0.9em; background: var(--card-background-color); color: var(--primary-text-color); }
         .mode.active { border-color: var(--primary-text-color); font-weight: 600; }
         .mode .swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
         .grid { position: relative; width: 100%; aspect-ratio: ${COLS} / ${ROWS}; touch-action: none; user-select: none; }
@@ -75,13 +75,13 @@ class AqaraFp400ZoneCard extends HTMLElement {
         .sensor { fill: var(--primary-text-color); }
         .target { fill: #fff; stroke: #000; stroke-width: 0.06; }
         .target.still { fill: #bbb; }
-        .toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; }
-        .chip { border: 2px solid transparent; border-radius: 16px; padding: 2px 10px; cursor: pointer; font-size: 0.85em; color: #fff; opacity: 0.6; }
+        .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+        .chip { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 40px; min-height: 40px; border: 2px solid transparent; border-radius: 20px; padding: 6px 14px; cursor: pointer; font-size: 0.95em; color: #fff; opacity: 0.6; }
         .chip.active { border-color: var(--primary-text-color); opacity: 1; }
         .chip.erase { background: #555; }
         .spacer { flex: 1; }
         mwc-button, button { font: inherit; }
-        button { background: var(--primary-color); color: var(--text-primary-color, #fff); border: 0; border-radius: 4px; padding: 6px 12px; cursor: pointer; }
+        button { background: var(--primary-color); color: var(--text-primary-color, #fff); border: 0; border-radius: 6px; padding: 9px 16px; min-height: 40px; cursor: pointer; }
         button.secondary { background: var(--secondary-background-color); color: var(--primary-text-color); }
         button:disabled { opacity: 0.4; cursor: default; }
         .hint { color: var(--secondary-text-color); font-size: 0.8em; margin-top: 6px; }
