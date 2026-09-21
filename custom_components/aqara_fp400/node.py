@@ -118,8 +118,10 @@ def _event_payload(data: Any) -> Any:
     return data
 
 
-def _zone_signature(zones: list[Zone]) -> list[tuple[int, bool, tuple[tuple[int, int], ...]]]:
-    return sorted((z.zone_id, z.enabled, tuple(tuple(c) for c in sorted(z.cells))) for z in zones)
+def _zone_signature(zones: list[Zone]) -> list[tuple[int, int, bool, tuple[tuple[int, int], ...]]]:
+    return sorted(
+        (z.zone_id, z.zone_type, z.enabled, tuple(tuple(c) for c in sorted(z.cells))) for z in zones
+    )
 
 
 def parse_zone(raw: Any) -> Zone | None:
@@ -348,12 +350,20 @@ class FP400Node:
         """
         while True:
             await asyncio.sleep(ZONE_POLL_S)
-            if self.zones_pending:
-                continue  # a local write is being verified; don't fight it
-            zones = await self.async_read_zones()
-            if zones is not None and _zone_signature(zones) != _zone_signature(self.zones):
-                self.zones = zones
-                self._notify()
+            try:
+                if self.zones_pending:
+                    continue  # a local write is being verified; don't fight it
+                zones = await self.async_read_zones()
+                # re-check after the await: a local write may have started meanwhile
+                if self.zones_pending or zones is None:
+                    continue
+                if _zone_signature(zones) != _zone_signature(self.zones):
+                    self.zones = zones
+                    self._notify()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                LOGGER.exception("%s: zone poll failed", self.name)
 
     async def _async_verify_zones(self, expected: list[Zone]) -> None:
         """Poll the device until its zone list matches what was written (it applies changes lazily)."""
