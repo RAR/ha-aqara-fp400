@@ -117,3 +117,7 @@ cd <core> && pytest tests/components/matter/test_zz_aqara_fp400.py
 
 The `aqara_presence_fp400` node fixture referenced by the tests is part of the Home Assistant change that adds the
 FP400 entities to the Matter integration.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
