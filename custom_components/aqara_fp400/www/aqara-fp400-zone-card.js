@@ -83,6 +83,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
         mwc-button, button { font: inherit; }
         button { background: var(--primary-color); color: var(--text-primary-color, #fff); border: 0; border-radius: 6px; padding: 9px 16px; min-height: 40px; cursor: pointer; }
         button.secondary { background: var(--secondary-background-color); color: var(--primary-text-color); }
+        button.danger { color: var(--error-color, #db4437); }
         button:disabled { opacity: 0.4; cursor: default; }
         .hint { color: var(--secondary-text-color); font-size: 0.8em; margin-top: 6px; }
         .error { color: var(--error-color); font-size: 0.85em; margin-top: 6px; }
@@ -331,23 +332,62 @@ class AqaraFp400ZoneCard extends HTMLElement {
 
   _zoneToolbar(bar, zones, state) {
     const max = state?.attributes?.max_zones || 8;
-    for (let id = 1; id <= max; id++) {
+    // show a chip only for zones that exist, plus the empty one currently being added
+    const ids = [...zones.keys()].sort((a, b) => a - b);
+    if (this._active > 0 && !zones.has(this._active)) ids.push(this._active);
+    for (const id of ids) {
       const chip = document.createElement("span");
       chip.className = "chip" + (this._active === id ? " active" : "");
       chip.style.background = ZONE_COLORS[(id - 1) % ZONE_COLORS.length];
       chip.textContent = `${id}${zones.has(id) ? ` (${zones.get(id).cells.size})` : ""}`;
-      chip.title = zones.has(id) ? "double-click to toggle enabled" : "";
+      chip.title = zones.has(id) ? "double-click to toggle enabled" : "new zone — paint to add cells";
       chip.addEventListener("click", () => { this._active = id; this._render(); });
       chip.addEventListener("dblclick", () => this._toggleEnabled(id));
       bar.appendChild(chip);
     }
-    const erase = document.createElement("span");
-    erase.className = "chip erase" + (this._active === 0 ? " active" : "");
-    erase.textContent = "erase";
-    erase.addEventListener("click", () => { this._active = 0; this._render(); });
-    bar.appendChild(erase);
+    if (ids.length) {
+      const erase = document.createElement("span");
+      erase.className = "chip erase" + (this._active === 0 ? " active" : "");
+      erase.textContent = "erase";
+      erase.title = "drag to remove cells from any zone";
+      erase.addEventListener("click", () => { this._active = 0; this._render(); });
+      bar.appendChild(erase);
+    }
+
+    const nextId = this._freeZoneId(zones, max);
+    const add = document.createElement("button");
+    add.className = "secondary";
+    add.textContent = "+ Add zone";
+    add.disabled = !nextId || this._saving;
+    add.addEventListener("click", () => { this._active = nextId; this._render(); });
+    bar.appendChild(add);
+
+    if (zones.has(this._active)) {
+      const del = document.createElement("button");
+      del.className = "secondary danger";
+      del.textContent = `Delete zone ${this._active}`;
+      del.disabled = this._saving;
+      del.addEventListener("click", () => this._deleteZone(this._active));
+      bar.appendChild(del);
+    }
 
     this._actionButtons(bar, !!this._edit, () => { this._edit = null; this._render(); }, () => this._save());
+  }
+
+  _freeZoneId(zones, max) {
+    for (let id = 1; id <= max; id++) if (!zones.has(id)) return id;
+    return 0;
+  }
+
+  _deleteZone(id) {
+    const zones = this._startEdit();
+    zones.delete(id);
+    this._active = [...zones.keys()].sort((a, b) => a - b)[0] || this._freeZoneId(zones, this._maxZones());
+    this._render();
+  }
+
+  _maxZones() {
+    return this._hass?.states[this._config.entity]?.attributes?.max_zones || 8;
   }
 
   _regionToolbar(bar, regions) {
