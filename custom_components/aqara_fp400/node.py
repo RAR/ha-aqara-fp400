@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -34,6 +35,7 @@ from .const import (
     LOGGER,
     MAX_ZONES,
     MOTION_EVENTS,
+    REGIONS,
     SENSOR_ENDPOINT,
     ZONE_POLL_S,
     cell_from_index,
@@ -181,6 +183,9 @@ class FP400Node:
     live_tracking: bool = False
     zones_pending: bool = False
     zones_error: str | None = None
+    regions: dict[str, list[list[int]]] = field(default_factory=dict)
+    regions_pending: dict[str, bool] = field(default_factory=dict)
+    regions_error: dict[str, str | None] = field(default_factory=dict)
     _listeners: list[Callable[[], None]] = field(default_factory=list)
     _unsubscribe: list[Callable[[], None]] = field(default_factory=list)
     _renew_task: asyncio.Task | None = None
@@ -276,9 +281,10 @@ class FP400Node:
     async def async_start(self) -> None:
         """Subscribe to node events and attribute updates."""
         self._refresh_zones()
+        self._refresh_regions()
         self.hass.async_create_background_task(self._async_initial_zones(), f"{self.name} read zones")
         self._zone_task = self.hass.async_create_background_task(
-            self._zone_poll_loop(), f"{self.name} poll zones"
+            self._zone_poll_loop(), f"{self.name} poll zones and regions"
         )
         self._unsubscribe.append(
             self.matter_client.subscribe_events(
@@ -341,6 +347,8 @@ class FP400Node:
         if (zones := await self.async_read_zones()) is not None:
             self.zones = zones
             self._notify()
+        await self.async_read_regions()
+        self._notify()
 
     async def _zone_poll_loop(self) -> None:
         """Re-read zones periodically so changes made in the Aqara app show up.
@@ -360,10 +368,14 @@ class FP400Node:
                 if _zone_signature(zones) != _zone_signature(self.zones):
                     self.zones = zones
                     self._notify()
+                before = {k: list(v) for k, v in self.regions.items()}
+                await self.async_read_regions()
+                if self.regions != before:
+                    self._notify()
             except asyncio.CancelledError:
                 raise
             except Exception:
-                LOGGER.exception("%s: zone poll failed", self.name)
+                LOGGER.exception("%s: zone/region poll failed", self.name)
 
     async def _async_verify_zones(self, expected: list[Zone]) -> None:
         """Poll the device until its zone list matches what was written (it applies changes lazily)."""
@@ -397,6 +409,68 @@ class FP400Node:
         raw = self._attr(SENSOR_ENDPOINT, CLUSTER_CONFIG, ATTR_ZONES) or []
         zones = [zone for zone in (parse_zone(item) for item in raw) if zone is not None]
         self.zones = sorted(zones, key=lambda zone: zone.zone_id)
+
+    # ---- regions (entry/exit, interference, monitoring) -------------------
+
+    @callback
+    def _refresh_regions(self) -> None:
+        """Decode the cached region bitmasks into cell lists."""
+        for key, attribute in REGIONS.items():
+            raw = self._attr(SENSOR_ENDPOINT, CLUSTER_CONFIG, attribute)
+            self.regions[key] = mask_to_cells(to_bytes(raw)) if raw else []
+
+    async def async_read_regions(self) -> None:
+        """Read the region bitmasks from the device (subscription misses their changes)."""
+        for key, attribute in REGIONS.items():
+            path = f"{SENSOR_ENDPOINT}/{CLUSTER_CONFIG}/{attribute}"
+            try:
+                result = await self.matter_client.read_attribute(self.node_id, path)
+            except Exception as err:
+                LOGGER.debug("%s: reading region %s failed: %s", self.name, key, err)
+                continue
+            if isinstance(result, dict) and path in result:
+                self.node.node_data.attributes[path] = result[path]
+                if not self.regions_pending.get(key):
+                    self.regions[key] = mask_to_cells(to_bytes(result[path])) if result[path] else []
+
+    async def async_set_region(self, key: str, cells: list[list[int]]) -> None:
+        """Write a region bitmask; show it immediately and confirm in the background."""
+        if key not in REGIONS:
+            raise ValueError(f"unknown region {key!r}; expected one of {', '.join(REGIONS)}")
+        mask = cells_to_mask((int(r), int(c)) for r, c in cells)
+        self.regions[key] = mask_to_cells(mask)
+        self.regions_pending[key] = True
+        self.regions_error[key] = None
+        self._notify()
+        try:
+            await self.async_write_config(REGIONS[key], base64.b64encode(mask).decode())
+        except Exception as err:
+            self.regions_pending[key] = False
+            self.regions_error[key] = str(err)
+            self._notify()
+            raise
+        self.hass.async_create_background_task(
+            self._async_verify_region(key, mask), f"{self.name} verify region {key}"
+        )
+
+    async def _async_verify_region(self, key: str, expected: bytes) -> None:
+        want = mask_to_cells(expected)
+        for delay in (0.5, 1, 1.5, 2, 3):
+            await asyncio.sleep(delay)
+            path = f"{SENSOR_ENDPOINT}/{CLUSTER_CONFIG}/{REGIONS[key]}"
+            try:
+                result = await self.matter_client.read_attribute(self.node_id, path)
+            except Exception:
+                continue
+            got = result.get(path) if isinstance(result, dict) else None
+            if got is not None and mask_to_cells(to_bytes(got)) == want:
+                self.regions[key], self.regions_pending[key], self.regions_error[key] = want, False, None
+                self._notify()
+                return
+        self.regions_pending[key] = False
+        self.regions_error[key] = "device kept a different region"
+        LOGGER.warning("%s: region %s did not read back as written", self.name, key)
+        self._notify()
 
     @callback
     def _on_attribute_updated(self, event: EventType, data: Any) -> None:

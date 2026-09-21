@@ -26,6 +26,46 @@ clear_zones:
           filter:
             - integration: aqara_fp400
             - integration: matter
+set_region:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          filter:
+            - integration: aqara_fp400
+            - integration: matter
+    region:
+      required: true
+      selector:
+        select:
+          options:
+            - entry_exit
+            - interference
+            - monitoring
+    cells:
+      required: true
+      example: |
+        "3-6,4-8"
+      selector:
+        object:
+clear_region:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          filter:
+            - integration: aqara_fp400
+            - integration: matter
+    region:
+      required: true
+      selector:
+        select:
+          options:
+            - entry_exit
+            - interference
+            - monitoring
 subscribe_location:
   fields:
     device_id:

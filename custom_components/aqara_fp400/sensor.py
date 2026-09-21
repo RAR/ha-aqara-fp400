@@ -34,6 +34,7 @@ async def async_setup_entry(
     def _add(fp: FP400Node) -> None:
         entities: list[FP400Entity] = [
             ZonesSensor(fp),
+            RegionsSensor(fp),
             TargetsSensor(fp),
             LastMotionSensor(fp),
             ActivityStateSensor(fp),
@@ -72,6 +73,30 @@ class ZonesSensor(FP400Entity, SensorEntity):
             "error": self.fp.zones_error,
             "max_zones": self.fp.max_zones,
             "zone_endpoints": self.fp.zone_endpoints(),
+            "grid_rows": GRID_ROWS,
+            "grid_cols": GRID_COLS,
+        }
+
+
+class RegionsSensor(FP400Entity, SensorEntity):
+    """Entry/exit, interference and monitoring regions; their cells ride along as attributes."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:selection-drag"
+
+    def __init__(self, fp: FP400Node) -> None:
+        super().__init__(fp, "regions")
+
+    @property
+    def native_value(self) -> int:
+        return sum(1 for cells in self.fp.regions.values() if cells)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "regions": {key: list(cells) for key, cells in self.fp.regions.items()},
+            "pending": dict(self.fp.regions_pending),
+            "error": dict(self.fp.regions_error),
             "grid_rows": GRID_ROWS,
             "grid_cols": GRID_COLS,
         }

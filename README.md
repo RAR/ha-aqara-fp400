@@ -18,6 +18,7 @@ on a "<device> radar" device linked to the sensor's Matter device.
 | Entity | Meaning |
 |---|---|
 | `sensor.<name>_radar_zones` | number of zones; attribute `zones` holds `[{id, type, enabled, cells: [[row, col], …]}]` |
+| `sensor.<name>_radar_regions` | number of non-empty regions; attribute `regions` holds `{entry_exit, interference, monitoring: [[row, col], …]}` |
 | `sensor.<name>_radar_tracked_people` | people currently tracked; attribute `targets` = `[{id, x, y, row, col, activity, zones}]` (cm) |
 | `sensor.<name>_radar_target_N_x` / `_y` | position of target N (disabled by default; enable for radar map cards) |
 | `sensor.<name>_radar_last_motion` | last motion event: enter / left / left_in / right_out / right_in / left_out / access / away |
@@ -48,6 +49,20 @@ data:
 
 `aqara_fp400.clear_zones`, `aqara_fp400.subscribe_location` (timeout in seconds, max 3600) and
 `aqara_fp400.start_learning` take just `device_id`.
+
+Regions (the entry/exit, interference and monitoring-range areas, drawn as cell masks on the same grid) are set the
+same way:
+
+```yaml
+action: aqara_fp400.set_region
+data:
+  device_id: <the FP400 device>
+  region: entry_exit        # or: interference, monitoring
+  cells: "6-7,4-6"          # rows,cols range, or explicit [[row, col], …]
+```
+
+`aqara_fp400.clear_region` takes `device_id` and `region`. The zone card can paint zones and all three regions —
+switch layers with the buttons above the grid.
 
 ## The grid
 

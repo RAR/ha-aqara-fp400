@@ -1,10 +1,11 @@
 /*
- * Aqara FP400 zone card — paints detection zones on the sensor's 20 x 16 grid and
- * shows tracked people live.
+ * Aqara FP400 zone card — paints detection zones and the entry/exit, interference and
+ * monitoring regions on the sensor's 20 x 16 grid, and shows tracked people live.
  *
  * Config:
  *   type: custom:aqara-fp400-zone-card
  *   entity: sensor.<device>_zones          (required; the "Zones" sensor of this integration)
+ *   regions_entity: sensor.<device>_regions (optional; derived from `entity` when omitted)
  *   targets_entity: sensor.<device>_tracked_people   (optional; derived from `entity` when omitted)
  *   title: Living room                      (optional)
  */
@@ -16,6 +17,12 @@ let ROWS = 20;
 const AHEAD_COL = 8.5 - 25 / 50;
 const CELL_CM = 50;
 const ZONE_COLORS = ["#4f8ef7", "#f75f4f", "#3bbf6a", "#f2b600", "#a35bf7", "#19b5c9", "#f77b1c", "#c9198f"];
+const REGION_KEYS = ["entry_exit", "interference", "monitoring"];
+const REGION_META = {
+  entry_exit: { label: "Entry/Exit", color: "#3bbf6a" },
+  interference: { label: "Interference", color: "#f75f4f" },
+  monitoring: { label: "Monitoring", color: "#f2b600" },
+};
 
 class AqaraFp400ZoneCard extends HTMLElement {
   static getStubConfig(hass) {
@@ -26,7 +33,9 @@ class AqaraFp400ZoneCard extends HTMLElement {
   setConfig(config) {
     if (!config.entity) throw new Error("entity (the Zones sensor) is required");
     this._config = config;
-    this._edit = null; // {zones: Map<id, Set<cellIndex>>, dirty}
+    this._mode = "zones"; // "zones" or a REGION_KEYS entry
+    this._edit = null; // zones edit: Map<id, {cells:Set, enabled, type}>
+    this._regionEdit = null; // region edit: {key, cells:Set}
     this._active = 1;
     this._pointerDown = false;
     this._paintValue = null;
@@ -53,11 +62,17 @@ class AqaraFp400ZoneCard extends HTMLElement {
         .header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
         .title { font-size: 1.1em; font-weight: 500; }
         .status { color: var(--secondary-text-color); font-size: 0.85em; }
+        .modes { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+        .mode { border: 1px solid var(--divider-color, #444); border-radius: 4px; padding: 3px 10px; cursor: pointer; font-size: 0.85em; background: var(--card-background-color); color: var(--primary-text-color); }
+        .mode.active { border-color: var(--primary-text-color); font-weight: 600; }
+        .mode .swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
         .grid { position: relative; width: 100%; aspect-ratio: ${COLS} / ${ROWS}; touch-action: none; user-select: none; }
         svg { width: 100%; height: 100%; display: block; }
         .cell { stroke: var(--divider-color, #444); stroke-width: 0.03; fill: var(--card-background-color, #1c1c1c); cursor: crosshair; }
         .cell.painted { fill-opacity: 0.55; }
         .cell.painted.disabled { fill-opacity: 0.2; }
+        .cell.region-tint { fill-opacity: 0.22; }
+        .cell.region-edge { stroke-width: 0.12; }
         .sensor { fill: var(--primary-text-color); }
         .target { fill: #fff; stroke: #000; stroke-width: 0.06; }
         .target.still { fill: #bbb; }
@@ -75,9 +90,10 @@ class AqaraFp400ZoneCard extends HTMLElement {
       </style>
       <ha-card>
         <div class="header"><span class="title"></span><span class="status"></span></div>
+        <div class="modes"></div>
         <div class="grid"><svg viewBox="0 0 ${COLS} ${ROWS}" preserveAspectRatio="none"></svg></div>
         <div class="toolbar"></div>
-        <div class="hint">Cells are ~50 cm; the sensor is the triangle at the bottom. Click or drag to paint the selected zone, double-click a zone chip to disable it, then Save. "verifying…" means the device is still applying the change.</div>
+        <div class="hint"></div>
         <div class="error"></div>
       </ha-card>`;
     this._svg = root.querySelector("svg");
@@ -117,7 +133,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
     this._svg.appendChild(this._targetLayer);
   }
 
-  // ---------------------------------------------------------------- state
+  // ---------------------------------------------------------------- state (zones)
 
   _entityZones() {
     const state = this._hass?.states[this._config.entity];
@@ -139,6 +155,35 @@ class AqaraFp400ZoneCard extends HTMLElement {
       this._edit = { zones };
     }
     return this._edit.zones;
+  }
+
+  // ---------------------------------------------------------------- state (regions)
+
+  _regionsEntity() {
+    return this._config.regions_entity || this._config.entity.replace(/_zones$/, "_regions");
+  }
+
+  _entityRegions() {
+    const attrs = this._hass?.states[this._regionsEntity()]?.attributes?.regions || {};
+    const out = {};
+    for (const key of REGION_KEYS) {
+      out[key] = new Set((attrs[key] || []).map(([r, c]) => r * COLS + c));
+    }
+    return out;
+  }
+
+  // cells of every region, with the one being edited overridden
+  _regions() {
+    const out = this._entityRegions();
+    if (this._regionEdit) out[this._regionEdit.key] = this._regionEdit.cells;
+    return out;
+  }
+
+  _startRegionEdit(key) {
+    if (!this._regionEdit || this._regionEdit.key !== key) {
+      this._regionEdit = { key, cells: new Set(this._entityRegions()[key]) };
+    }
+    return this._regionEdit.cells;
   }
 
   _targetsEntity() {
@@ -166,23 +211,49 @@ class AqaraFp400ZoneCard extends HTMLElement {
     const targetsState = this._hass.states[this._targetsEntity()];
     const targets = targetsState?.attributes?.targets || [];
     const live = targetsState?.attributes?.live_tracking;
-    let sync = "synced";
-    if (this._saving) sync = "saving…";
-    else if (this._edit) sync = "unsaved";
-    else if (state?.attributes?.pending) sync = "verifying…";
-    else if (state?.attributes?.error) sync = "⚠ " + state.attributes.error;
     root.querySelector(".status").textContent = state
-      ? `${targets.length} tracked · ${targetsState?.attributes?.activity_state || "?"}${live ? " · live" : ""} · ${sync}`
+      ? `${targets.length} tracked · ${targetsState?.attributes?.activity_state || "?"}${live ? " · live" : ""} · ${this._syncLabel(state)}`
       : "entity not found";
 
     const zones = this._zones();
+    const regions = this._regions();
+    const editingRegion = this._mode !== "zones" ? this._mode : null;
+
     const owner = new Array(ROWS * COLS).fill(null);
     for (const [id, zone] of zones) for (const idx of zone.cells) owner[idx] = id;
+    // region membership per cell (active region first so its edge/tint wins)
+    const order = editingRegion ? [editingRegion, ...REGION_KEYS.filter((k) => k !== editingRegion)] : REGION_KEYS;
+
     this._cells.forEach((rect, idx) => {
-      const id = owner[idx];
-      rect.classList.toggle("painted", id !== null);
-      rect.classList.toggle("disabled", id !== null && zones.get(id).enabled === false);
-      rect.style.fill = id === null ? "" : ZONE_COLORS[(id - 1) % ZONE_COLORS.length];
+      rect.classList.remove("painted", "disabled", "region-tint", "region-edge");
+      rect.style.fill = "";
+      rect.style.stroke = "";
+      const regionKey = order.find((k) => regions[k].has(idx)) || null;
+      const zoneId = owner[idx];
+      if (editingRegion) {
+        // region-edit mode: the edited region is solid, others + zones are context
+        if (regions[editingRegion].has(idx)) {
+          rect.classList.add("painted");
+          rect.style.fill = REGION_META[editingRegion].color;
+        } else if (zoneId !== null) {
+          rect.classList.add("region-tint");
+          rect.style.fill = ZONE_COLORS[(zoneId - 1) % ZONE_COLORS.length];
+        } else if (regionKey) {
+          rect.classList.add("region-tint");
+          rect.style.fill = REGION_META[regionKey].color;
+        }
+      } else if (zoneId !== null) {
+        rect.classList.add("painted");
+        rect.classList.toggle("disabled", zones.get(zoneId).enabled === false);
+        rect.style.fill = ZONE_COLORS[(zoneId - 1) % ZONE_COLORS.length];
+      } else if (regionKey) {
+        rect.classList.add("region-tint");
+        rect.style.fill = REGION_META[regionKey].color;
+      }
+      if (regionKey && !(editingRegion && regionKey === editingRegion)) {
+        rect.classList.add("region-edge");
+        rect.style.stroke = REGION_META[regionKey].color;
+      }
     });
 
     this._targetLayer.innerHTML = "";
@@ -199,12 +270,55 @@ class AqaraFp400ZoneCard extends HTMLElement {
       this._targetLayer.appendChild(dot);
     }
 
-    this._renderToolbar(zones, state);
+    this._renderModes();
+    this._renderToolbar(zones, regions, state);
+    root.querySelector(".hint").textContent = editingRegion
+      ? `Editing the ${REGION_META[editingRegion].label} region. Click or drag to add cells, drag from a filled cell to erase, then Save.`
+      : `Cells are ~50 cm; the sensor is the triangle at the bottom. Click or drag to paint the selected zone, double-click a zone chip to disable it, then Save.`;
   }
 
-  _renderToolbar(zones, state) {
+  _syncLabel(state) {
+    if (this._saving) return "saving…";
+    const dirty = this._mode === "zones" ? this._edit : this._regionEdit && this._regionEdit.key === this._mode;
+    if (dirty) return "unsaved";
+    if (this._mode === "zones") {
+      if (state?.attributes?.pending) return "verifying…";
+      if (state?.attributes?.error) return "⚠ " + state.attributes.error;
+      return "synced";
+    }
+    const rstate = this._hass.states[this._regionsEntity()]?.attributes;
+    if (rstate?.pending?.[this._mode]) return "verifying…";
+    if (rstate?.error?.[this._mode]) return "⚠ " + rstate.error[this._mode];
+    return "synced";
+  }
+
+  _renderModes() {
+    const bar = this.shadowRoot.querySelector(".modes");
+    bar.innerHTML = "";
+    const mk = (key, label, color) => {
+      const b = document.createElement("span");
+      b.className = "mode" + (this._mode === key ? " active" : "");
+      b.innerHTML = (color ? `<span class="swatch" style="background:${color}"></span>` : "") + label;
+      b.addEventListener("click", () => {
+        if (this._mode === key) return;
+        this._mode = key;
+        if (key === "zones") this._active = 1;
+        this._render();
+      });
+      bar.appendChild(b);
+    };
+    mk("zones", "Zones", null);
+    for (const key of REGION_KEYS) mk(key, REGION_META[key].label, REGION_META[key].color);
+  }
+
+  _renderToolbar(zones, regions, state) {
     const bar = this.shadowRoot.querySelector(".toolbar");
     bar.innerHTML = "";
+    if (this._mode === "zones") this._zoneToolbar(bar, zones, state);
+    else this._regionToolbar(bar, regions);
+  }
+
+  _zoneToolbar(bar, zones, state) {
     const max = state?.attributes?.max_zones || 8;
     for (let id = 1; id <= max; id++) {
       const chip = document.createElement("span");
@@ -222,6 +336,29 @@ class AqaraFp400ZoneCard extends HTMLElement {
     erase.addEventListener("click", () => { this._active = 0; this._render(); });
     bar.appendChild(erase);
 
+    this._actionButtons(bar, !!this._edit, () => { this._edit = null; this._render(); }, () => this._save());
+  }
+
+  _regionToolbar(bar, regions) {
+    const key = this._mode;
+    const count = regions[key].size;
+    const label = document.createElement("span");
+    label.className = "chip active";
+    label.style.background = REGION_META[key].color;
+    label.textContent = `${REGION_META[key].label} (${count})`;
+    bar.appendChild(label);
+
+    const clear = document.createElement("button");
+    clear.className = "secondary";
+    clear.textContent = "Clear";
+    clear.disabled = this._saving;
+    clear.addEventListener("click", () => { this._startRegionEdit(key).clear(); this._render(); });
+    bar.appendChild(clear);
+
+    this._actionButtons(bar, !!(this._regionEdit && this._regionEdit.key === key), () => { this._regionEdit = null; this._render(); }, () => this._saveRegion());
+  }
+
+  _actionButtons(bar, dirty, onRevert, onSave) {
     const spacer = document.createElement("span");
     spacer.className = "spacer";
     bar.appendChild(spacer);
@@ -229,14 +366,14 @@ class AqaraFp400ZoneCard extends HTMLElement {
     const revert = document.createElement("button");
     revert.className = "secondary";
     revert.textContent = "Revert";
-    revert.disabled = !this._edit;
-    revert.addEventListener("click", () => { this._edit = null; this._render(); });
+    revert.disabled = !dirty || this._saving;
+    revert.addEventListener("click", onRevert);
     bar.appendChild(revert);
 
     const save = document.createElement("button");
     save.textContent = this._saving ? "Saving…" : "Save";
-    save.disabled = !this._edit || this._saving;
-    save.addEventListener("click", () => this._save());
+    save.disabled = !dirty || this._saving;
+    save.addEventListener("click", onSave);
     bar.appendChild(save);
   }
 
@@ -253,6 +390,12 @@ class AqaraFp400ZoneCard extends HTMLElement {
     const idx = cell?.dataset?.index;
     if (idx === undefined) return;
     const index = Number(idx);
+    if (this._mode === "zones") this._paintZone(index, down);
+    else this._paintRegion(index, down);
+    this._render();
+  }
+
+  _paintZone(index, down) {
     const zones = this._startEdit();
     if (down) {
       // first cell decides whether this stroke paints or erases the active zone
@@ -264,7 +407,13 @@ class AqaraFp400ZoneCard extends HTMLElement {
       zones.get(this._active).cells.add(index);
     }
     for (const [id, zone] of [...zones]) if (zone.cells.size === 0) zones.delete(id);
-    this._render();
+  }
+
+  _paintRegion(index, down) {
+    const cells = this._startRegionEdit(this._mode);
+    if (down) this._paintValue = !cells.has(index);
+    if (this._paintValue) cells.add(index);
+    else cells.delete(index);
   }
 
   _toggleEnabled(id) {
@@ -273,31 +422,46 @@ class AqaraFp400ZoneCard extends HTMLElement {
     this._render();
   }
 
-  async _save() {
+  _cellsToRowCol(set) {
+    return [...set].sort((a, b) => a - b).map((idx) => [Math.floor(idx / COLS), idx % COLS]);
+  }
+
+  async _runService(service, data) {
     const error = this.shadowRoot.querySelector(".error");
     error.textContent = "";
     const deviceId = this._deviceId();
     if (!deviceId) {
       error.textContent = "Cannot resolve the device of " + this._config.entity;
-      return;
+      return false;
     }
-    const zones = [...this._zones()].map(([id, zone]) => ({
-      id,
-      enabled: zone.enabled,
-      type: zone.type || 0,
-      cells: [...zone.cells].sort((a, b) => a - b).map((idx) => [Math.floor(idx / COLS), idx % COLS]),
-    }));
     this._saving = true;
     this._render();
     try {
-      await this._hass.callService("aqara_fp400", "set_zones", { device_id: deviceId, zones });
-      this._edit = null;
+      await this._hass.callService("aqara_fp400", service, { device_id: deviceId, ...data });
+      return true;
     } catch (err) {
       error.textContent = err?.message || String(err);
+      return false;
     } finally {
       this._saving = false;
       this._render();
     }
+  }
+
+  async _save() {
+    const zones = [...this._zones()].map(([id, zone]) => ({
+      id,
+      enabled: zone.enabled,
+      type: zone.type || 0,
+      cells: this._cellsToRowCol(zone.cells),
+    }));
+    if (await this._runService("set_zones", { zones })) this._edit = null;
+  }
+
+  async _saveRegion() {
+    const key = this._mode;
+    const cells = this._cellsToRowCol(this._regions()[key]);
+    if (await this._runService("set_region", { region: key, cells })) this._regionEdit = null;
   }
 }
 
@@ -306,6 +470,6 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "aqara-fp400-zone-card",
   name: "Aqara FP400 zone card",
-  description: "Paint detection zones and watch tracked people on the FP400 grid.",
+  description: "Paint detection zones and regions and watch tracked people on the FP400 grid.",
   preview: false,
 });

@@ -30,7 +30,10 @@ from .const import (
     GRID_ROWS,
     LOGGER,
     PRODUCT_ID_FP400,
+    REGIONS,
+    SERVICE_CLEAR_REGION,
     SERVICE_CLEAR_ZONES,
+    SERVICE_SET_REGION,
     SERVICE_SET_ZONES,
     SERVICE_START_LEARNING,
     SERVICE_SUBSCRIBE_LOCATION,
@@ -193,6 +196,19 @@ SET_ZONES_SCHEMA = vol.Schema(
     }
 )
 DEVICE_SCHEMA = vol.Schema({vol.Required("device_id"): cv.string})
+SET_REGION_SCHEMA = vol.Schema(
+    {
+        vol.Required("device_id"): cv.string,
+        vol.Required("region"): vol.In(list(REGIONS)),
+        vol.Required("cells"): _cell_list,
+    }
+)
+CLEAR_REGION_SCHEMA = vol.Schema(
+    {
+        vol.Required("device_id"): cv.string,
+        vol.Required("region"): vol.In(list(REGIONS)),
+    }
+)
 SUBSCRIBE_SCHEMA = vol.Schema(
     {
         vol.Required("device_id"): cv.string,
@@ -234,6 +250,17 @@ def _async_register_services(hass: HomeAssistant, entry: FP400ConfigEntry) -> No
         fp = _node_for_device(hass, call.data["device_id"])
         await fp.async_set_zones([])
 
+    async def set_region(call: ServiceCall) -> None:
+        fp = _node_for_device(hass, call.data["device_id"])
+        try:
+            await fp.async_set_region(call.data["region"], call.data["cells"])
+        except ValueError as err:
+            raise HomeAssistantError(str(err)) from err
+
+    async def clear_region(call: ServiceCall) -> None:
+        fp = _node_for_device(hass, call.data["device_id"])
+        await fp.async_set_region(call.data["region"], [])
+
     async def subscribe_location(call: ServiceCall) -> None:
         fp = _node_for_device(hass, call.data["device_id"])
         await fp.async_subscribe_location(call.data["timeout"])
@@ -246,5 +273,7 @@ def _async_register_services(hass: HomeAssistant, entry: FP400ConfigEntry) -> No
         DOMAIN, SERVICE_SET_ZONES, set_zones, schema=SET_ZONES_SCHEMA, supports_response=SupportsResponse.OPTIONAL
     )
     hass.services.async_register(DOMAIN, SERVICE_CLEAR_ZONES, clear_zones, schema=DEVICE_SCHEMA)
+    hass.services.async_register(DOMAIN, SERVICE_SET_REGION, set_region, schema=SET_REGION_SCHEMA)
+    hass.services.async_register(DOMAIN, SERVICE_CLEAR_REGION, clear_region, schema=CLEAR_REGION_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_SUBSCRIBE_LOCATION, subscribe_location, schema=SUBSCRIBE_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_START_LEARNING, start_learning, schema=DEVICE_SCHEMA)

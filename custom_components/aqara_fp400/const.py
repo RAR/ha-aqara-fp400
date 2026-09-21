@@ -25,6 +25,17 @@ ATTR_INSTALL_STATUS = 7
 ATTR_INSTALL_ANGLE = 8
 ATTR_ZONES = 16
 ATTR_MAX_ZONES = 17
+ATTR_ENTRY_EXIT_REGION = 18
+ATTR_INTERFERENCE_REGION = 19
+ATTR_MONITORING_REGION = 20  # "edge" region; shown as "Monitoring Range" in the app
+
+# Region key -> AmbientSensingConfiguration attribute id. Each is a 40 byte cell bitmask on
+# the same grid as zones, set by writing the attribute (unlike zones, which use commands).
+REGIONS = {
+    "entry_exit": ATTR_ENTRY_EXIT_REGION,
+    "interference": ATTR_INTERFERENCE_REGION,
+    "monitoring": ATTR_MONITORING_REGION,
+}
 ATTR_ACTIVITY_STATE = 7
 ATTR_HUMAN_COUNT = 2
 ATTR_ZONE_ID = 1
@@ -83,6 +94,8 @@ CONF_NODE_ID = "node_id"
 
 SERVICE_SET_ZONES = "set_zones"
 SERVICE_CLEAR_ZONES = "clear_zones"
+SERVICE_SET_REGION = "set_region"
+SERVICE_CLEAR_REGION = "clear_region"
 SERVICE_SUBSCRIBE_LOCATION = "subscribe_location"
 SERVICE_START_LEARNING = "start_learning"
 

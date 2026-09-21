@@ -64,6 +64,9 @@
       },
       "install_angle": {
         "name": "Install angle"
+      },
+      "regions": {
+        "name": "Regions"
       }
     },
     "switch": {
@@ -173,6 +176,38 @@
         "device_id": {
           "name": "Device",
           "description": "The FP400."
+        }
+      }
+    },
+    "set_region": {
+      "name": "Set region",
+      "description": "Set an entry/exit, interference or monitoring region to a set of grid cells.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "The FP400 to configure."
+        },
+        "region": {
+          "name": "Region",
+          "description": "Which region to set."
+        },
+        "cells": {
+          "name": "Cells",
+          "description": "Cells as [[row, col], ...] or a \"rows,cols\" range like \"3-6,4-8\"."
+        }
+      }
+    },
+    "clear_region": {
+      "name": "Clear region",
+      "description": "Clear an entry/exit, interference or monitoring region.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "The FP400 to configure."
+        },
+        "region": {
+          "name": "Region",
+          "description": "Which region to clear."
         }
       }
     }
