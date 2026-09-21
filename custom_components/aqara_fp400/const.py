@@ -36,6 +36,10 @@ REGIONS = {
     "interference": ATTR_INTERFERENCE_REGION,
     "monitoring": ATTR_MONITORING_REGION,
 }
+
+# For these regions the device stores the EXCLUDED cells; it monitors the cleared cells. We
+# invert on read/write so the sensor, services and card all speak the *monitored* area.
+INVERTED_REGIONS = {"monitoring"}
 ATTR_ACTIVITY_STATE = 7
 ATTR_HUMAN_COUNT = 2
 ATTR_ZONE_ID = 1

@@ -30,6 +30,9 @@ from .const import (
     DOMAIN,
     EVENT_LOCATION_INFO,
     EVENT_MOTION_DETECTED,
+    GRID_COLS,
+    GRID_ROWS,
+    INVERTED_REGIONS,
     LOCATION_RENEW_S,
     LOCATION_SUBSCRIPTION_S,
     LOGGER,
@@ -412,12 +415,29 @@ class FP400Node:
 
     # ---- regions (entry/exit, interference, monitoring) -------------------
 
+    @staticmethod
+    def _region_cells(key: str, mask: bytes) -> list[list[int]]:
+        """The cells this region means, inverting the ones the device stores as exclusions."""
+        cells = mask_to_cells(mask)
+        if key not in INVERTED_REGIONS:
+            return cells
+        excluded = {(r, c) for r, c in cells}
+        return [[r, c] for r in range(GRID_ROWS) for c in range(GRID_COLS) if (r, c) not in excluded]
+
+    @staticmethod
+    def _region_mask(key: str, cells: list[list[int]]) -> bytes:
+        """The bitmask to write for a region's cells (complemented for inverted regions)."""
+        points = {(int(r), int(c)) for r, c in cells}
+        if key in INVERTED_REGIONS:
+            points = {(r, c) for r in range(GRID_ROWS) for c in range(GRID_COLS)} - points
+        return cells_to_mask(points)
+
     @callback
     def _refresh_regions(self) -> None:
         """Decode the cached region bitmasks into cell lists."""
         for key, attribute in REGIONS.items():
             raw = self._attr(SENSOR_ENDPOINT, CLUSTER_CONFIG, attribute)
-            self.regions[key] = mask_to_cells(to_bytes(raw)) if raw else []
+            self.regions[key] = self._region_cells(key, to_bytes(raw)) if raw else []
 
     async def async_read_regions(self) -> None:
         """Read the region bitmasks from the device (subscription misses their changes)."""
@@ -431,14 +451,14 @@ class FP400Node:
             if isinstance(result, dict) and path in result:
                 self.node.node_data.attributes[path] = result[path]
                 if not self.regions_pending.get(key):
-                    self.regions[key] = mask_to_cells(to_bytes(result[path])) if result[path] else []
+                    self.regions[key] = self._region_cells(key, to_bytes(result[path])) if result[path] else []
 
     async def async_set_region(self, key: str, cells: list[list[int]]) -> None:
-        """Write a region bitmask; show it immediately and confirm in the background."""
+        """Write a region; show it immediately and confirm in the background."""
         if key not in REGIONS:
             raise ValueError(f"unknown region {key!r}; expected one of {', '.join(REGIONS)}")
-        mask = cells_to_mask((int(r), int(c)) for r, c in cells)
-        self.regions[key] = mask_to_cells(mask)
+        mask = self._region_mask(key, cells)
+        self.regions[key] = self._region_cells(key, mask)
         self.regions_pending[key] = True
         self.regions_error[key] = None
         self._notify()
@@ -454,7 +474,7 @@ class FP400Node:
         )
 
     async def _async_verify_region(self, key: str, expected: bytes) -> None:
-        want = mask_to_cells(expected)
+        want = self._region_cells(key, expected)
         for delay in (0.5, 1, 1.5, 2, 3):
             await asyncio.sleep(delay)
             path = f"{SENSOR_ENDPOINT}/{CLUSTER_CONFIG}/{REGIONS[key]}"
@@ -463,7 +483,7 @@ class FP400Node:
             except Exception:
                 continue
             got = result.get(path) if isinstance(result, dict) else None
-            if got is not None and mask_to_cells(to_bytes(got)) == want:
+            if got is not None and self._region_cells(key, to_bytes(got)) == want:
                 self.regions[key], self.regions_pending[key], self.regions_error[key] = want, False, None
                 self._notify()
                 return
