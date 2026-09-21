@@ -27,6 +27,10 @@ on a "<device> radar" device linked to the sensor's Matter device.
 
 ## What you get
 
+<p align="center">
+  <img src="docs/device-page.png" alt="The device page in Home Assistant: sensors, configuration selects and numbers, diagnostic entities" width="560">
+</p>
+
 | Entity | Meaning |
 |---|---|
 | `sensor.<name>_radar_zones` | number of zones; attribute `zones` holds `[{id, type, enabled, cells: [[row, col], …]}]` |
