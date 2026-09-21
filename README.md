@@ -61,7 +61,8 @@ data:
   cells: "6-7,4-6"          # rows,cols range, or explicit [[row, col], …]
 ```
 
-`aqara_fp400.clear_region` takes `device_id` and `region`. The zone card can paint zones and all three regions —
+`aqara_fp400.clear_region` takes `device_id` and `region`. Clearing the `monitoring` region means the full grid (the
+device would detect nobody if the range were empty). The zone card can paint zones and all three regions —
 switch layers with the buttons above the grid.
 
 ## The grid

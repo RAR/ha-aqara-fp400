@@ -133,6 +133,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
         .footer { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--divider-color); }
         .footer .hint { flex: 1; color: var(--secondary-text-color); font-size: 0.82em; line-height: 1.35; }
         .footer.dirty .hint { color: var(--primary-text-color); }
+        .footer.warn .hint { color: var(--error-color, #db4437); font-weight: 500; }
         .footer .actions { display: flex; gap: 8px; flex: none; }
         .error { color: var(--error-color); font-size: 0.85em; margin-top: 8px; }
         .error:empty { display: none; }
@@ -360,7 +361,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
     // second while live tracking is on, and replacing a button between mousedown and mouseup
     // swallows the click.
     const key = JSON.stringify([
-      this._mode, this._active, !!this._saving, !!this._edit, this._regionEdit?.key,
+      this._mode, this._active, !!this._saving, !!this._edit, this._regionEdit?.key, !!this._confirmedEmpty,
       [...zones].map(([id, z]) => [id, z.cells.size, z.enabled]),
       REGION_KEYS.map((k) => regions[k].size),
       state?.attributes?.max_zones,
@@ -512,7 +513,8 @@ class AqaraFp400ZoneCard extends HTMLElement {
     const hint = zones.size || adding
       ? "Click or drag on the grid to paint the selected zone. Painting over another zone moves those cells."
       : "No zones yet. Each zone becomes its own occupancy sensor in Home Assistant.";
-    this._actionButtons(hint, !!this._edit, () => { this._edit = null; this._render(); }, () => this._save());
+    const removingAll = this._confirmedEmpty && this._zones().size === 0;
+    this._actionButtons(hint, !!this._edit, () => { this._edit = null; this._confirmedEmpty = false; this._render(); }, () => this._save(), removingAll ? `This removes all ${this._entityZones().size} zones from the device. Press Save again to confirm.` : null);
   }
 
   _freeZoneId(zones, max) {
@@ -534,19 +536,27 @@ class AqaraFp400ZoneCard extends HTMLElement {
     panel.innerHTML = `<span class="name"><span class="dot" style="background:${meta.color}"></span>${meta.label}</span><span class="meta">${count ? `${count} cells` : "not set"} · ${meta.help}</span><span class="spacer"></span>`;
     const clear = document.createElement("button");
     clear.className = "secondary small";
-    clear.textContent = "Clear";
-    clear.disabled = this._saving || count === 0;
-    clear.addEventListener("click", () => { this._startRegionEdit(key).clear(); this._render(); });
+    const inverted = key === "monitoring";
+    clear.textContent = inverted ? "Full range" : "Clear";
+    clear.title = inverted ? "Monitor the whole grid" : "Remove every cell of this region";
+    clear.disabled = this._saving || (inverted ? count === ROWS * COLS : count === 0);
+    clear.addEventListener("click", () => {
+      const cells = this._startRegionEdit(key);
+      cells.clear();
+      if (inverted) for (let i = 0; i < ROWS * COLS; i++) cells.add(i);
+      this._render();
+    });
     panel.appendChild(clear);
 
     const dirty = !!(this._regionEdit && this._regionEdit.key === key);
     this._actionButtons("Click or drag on the grid to add cells; drag from a filled cell to remove.", dirty, () => { this._regionEdit = null; this._render(); }, () => this._saveRegion());
   }
 
-  _actionButtons(hint, dirty, onRevert, onSave) {
+  _actionButtons(hint, dirty, onRevert, onSave, warning = null) {
     const footer = this.shadowRoot.querySelector(".footer");
     footer.classList.toggle("dirty", dirty);
-    footer.querySelector(".hint").textContent = dirty ? "You have unsaved changes." : hint;
+    footer.classList.toggle("warn", !!warning);
+    footer.querySelector(".hint").textContent = warning || (dirty ? "You have unsaved changes." : hint);
     const actions = footer.querySelector(".actions");
     actions.innerHTML = "";
 
@@ -558,7 +568,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
     actions.appendChild(revert);
 
     const save = document.createElement("button");
-    save.textContent = this._saving ? "Saving…" : "Save";
+    save.textContent = this._saving ? "Saving…" : warning ? "Save anyway" : "Save";
     save.disabled = !dirty || this._saving;
     save.addEventListener("click", onSave);
     actions.appendChild(save);
@@ -636,6 +646,13 @@ class AqaraFp400ZoneCard extends HTMLElement {
   }
 
   async _save() {
+    if (this._zones().size === 0 && this._entityZones().size > 0 && !this._confirmedEmpty) {
+      this._confirmedEmpty = true; // next Save goes through; the footer explains
+      this._controlsKey = null;
+      this._render();
+      return;
+    }
+    this._confirmedEmpty = false;
     const zones = [...this._zones()].map(([id, zone]) => ({
       id,
       enabled: zone.enabled,

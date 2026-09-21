@@ -24,7 +24,9 @@ from .const import (
     ATTR_MAX_ZONES,
     ATTR_ZONE_ID,
     ATTR_ZONES,
+    CLUSTER_BASIC_INFORMATION,
     CLUSTER_CONFIG,
+    CLUSTER_GENERAL_DIAGNOSTICS,
     CLUSTER_LOCATION,
     CLUSTER_RADAR,
     DOMAIN,
@@ -193,6 +195,8 @@ class FP400Node:
     _unsubscribe: list[Callable[[], None]] = field(default_factory=list)
     _renew_task: asyncio.Task | None = None
     _zone_task: asyncio.Task | None = None
+    _renew_now: asyncio.Event = field(default_factory=asyncio.Event)
+    _was_available: bool = True
 
     @property
     def node_id(self) -> int:
@@ -300,6 +304,14 @@ class FP400Node:
             self.matter_client.subscribe_events(
                 callback=self._on_attribute_updated,
                 event_filter=EventType.ATTRIBUTE_UPDATED,
+                node_filter=self.node_id,
+            )
+        )
+        self._was_available = self.node.available
+        self._unsubscribe.append(
+            self.matter_client.subscribe_events(
+                callback=self._on_node_updated,
+                event_filter=EventType.NODE_UPDATED,
                 node_filter=self.node_id,
             )
         )
@@ -457,6 +469,10 @@ class FP400Node:
         """Write a region; show it immediately and confirm in the background."""
         if key not in REGIONS:
             raise ValueError(f"unknown region {key!r}; expected one of {', '.join(REGIONS)}")
+        if key in INVERTED_REGIONS and not cells:
+            # "Clear" on the monitoring range means the full grid, never "monitor nothing"
+            # (the device would then see nobody at all).
+            cells = [[r, c] for r in range(GRID_ROWS) for c in range(GRID_COLS)]
         mask = self._region_mask(key, cells)
         self.regions[key] = self._region_cells(key, mask)
         self.regions_pending[key] = True
@@ -502,6 +518,20 @@ class FP400Node:
             LOGGER.exception("%s: failed to handle attribute update %s", self.name, data)
 
     @callback
+    def _on_node_updated(self, event: EventType, node: MatterNode) -> None:
+        """The device came back (reboot, Thread hiccup): its location subscription is gone."""
+        available = bool(getattr(node, "available", True))
+        if available and not self._was_available:
+            LOGGER.debug("%s: device reconnected", self.name)
+            self._kick_location_renew()
+        self._was_available = available
+
+    @callback
+    def _kick_location_renew(self) -> None:
+        if self.live_tracking:
+            self._renew_now.set()
+
+    @callback
     def _on_node_event(self, event: EventType, data: MatterNodeEvent) -> None:
         try:
             self._handle_node_event(data)
@@ -523,6 +553,11 @@ class FP400Node:
 
     def _handle_node_event(self, data: MatterNodeEvent) -> None:
         payload = _event_payload(data.data)
+        if data.cluster_id in (CLUSTER_BASIC_INFORMATION, CLUSTER_GENERAL_DIAGNOSTICS) and data.event_id == 0:
+            # basicInformation.startUp / generalDiagnostics.bootReason: the device rebooted
+            LOGGER.info("%s: device rebooted; renewing the location stream", self.name)
+            self._kick_location_renew()
+            return
         if data.cluster_id == CLUSTER_LOCATION and data.event_id == EVENT_LOCATION_INFO:
             if data.endpoint_id != SENSOR_ENDPOINT:
                 return
@@ -598,13 +633,20 @@ class FP400Node:
 
     async def _renew_loop(self) -> None:
         while True:
+            self._renew_now.clear()
             try:
                 await self.async_subscribe_location()
             except Exception as err:
                 LOGGER.warning("%s: location subscription failed: %s", self.name, err)
-                await asyncio.sleep(60)
-                continue
-            await asyncio.sleep(LOCATION_RENEW_S)
+                delay = 60
+            else:
+                delay = LOCATION_RENEW_S
+            # sleep until the renew is due, or earlier when the device reconnected/rebooted
+            try:
+                await asyncio.wait_for(self._renew_now.wait(), delay)
+                await asyncio.sleep(2)  # let the device finish booting
+            except TimeoutError:
+                pass
 
     @staticmethod
     def _check_status(result: Any) -> None:
