@@ -72,7 +72,6 @@ class AqaraFp400ZoneCard extends HTMLElement {
         .cell.painted { fill-opacity: 0.55; }
         .cell.painted.disabled { fill-opacity: 0.2; }
         .cell.region-tint { fill-opacity: 0.22; }
-        .cell.region-edge { stroke-width: 0.12; }
         .sensor { fill: var(--primary-text-color); }
         .target { fill: #fff; stroke: #000; stroke-width: 0.06; }
         .target.still { fill: #bbb; }
@@ -129,6 +128,8 @@ class AqaraFp400ZoneCard extends HTMLElement {
     sensor.setAttribute("d", `M ${AHEAD_COL - 0.6} ${ROWS} L ${AHEAD_COL} ${ROWS - 0.7} L ${AHEAD_COL + 0.6} ${ROWS} Z`);
     sensor.classList.add("sensor");
     this._svg.appendChild(sensor);
+    this._regionLayer = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    this._svg.appendChild(this._regionLayer);
     this._targetLayer = document.createElementNS("http://www.w3.org/2000/svg", "g");
     this._svg.appendChild(this._targetLayer);
   }
@@ -221,40 +222,27 @@ class AqaraFp400ZoneCard extends HTMLElement {
 
     const owner = new Array(ROWS * COLS).fill(null);
     for (const [id, zone] of zones) for (const idx of zone.cells) owner[idx] = id;
-    // region membership per cell (active region first so its edge/tint wins)
-    const order = editingRegion ? [editingRegion, ...REGION_KEYS.filter((k) => k !== editingRegion)] : REGION_KEYS;
 
     this._cells.forEach((rect, idx) => {
-      rect.classList.remove("painted", "disabled", "region-tint", "region-edge");
+      rect.classList.remove("painted", "disabled", "region-tint");
       rect.style.fill = "";
-      rect.style.stroke = "";
-      const regionKey = order.find((k) => regions[k].has(idx)) || null;
       const zoneId = owner[idx];
-      if (editingRegion) {
-        // region-edit mode: the edited region is solid, others + zones are context
-        if (regions[editingRegion].has(idx)) {
-          rect.classList.add("painted");
-          rect.style.fill = REGION_META[editingRegion].color;
-        } else if (zoneId !== null) {
-          rect.classList.add("region-tint");
-          rect.style.fill = ZONE_COLORS[(zoneId - 1) % ZONE_COLORS.length];
-        } else if (regionKey) {
-          rect.classList.add("region-tint");
-          rect.style.fill = REGION_META[regionKey].color;
-        }
-      } else if (zoneId !== null) {
+      if (editingRegion && regions[editingRegion].has(idx)) {
         rect.classList.add("painted");
-        rect.classList.toggle("disabled", zones.get(zoneId).enabled === false);
+        rect.style.fill = REGION_META[editingRegion].color;
+      } else if (zoneId !== null) {
+        rect.classList.add(editingRegion ? "region-tint" : "painted");
+        if (!editingRegion) rect.classList.toggle("disabled", zones.get(zoneId).enabled === false);
         rect.style.fill = ZONE_COLORS[(zoneId - 1) % ZONE_COLORS.length];
-      } else if (regionKey) {
-        rect.classList.add("region-tint");
-        rect.style.fill = REGION_META[regionKey].color;
-      }
-      if (regionKey && !(editingRegion && regionKey === editingRegion)) {
-        rect.classList.add("region-edge");
-        rect.style.stroke = REGION_META[regionKey].color;
       }
     });
+
+    // regions are drawn as a single outline around their area (the edited one is solid, above)
+    this._regionLayer.innerHTML = "";
+    for (const key of REGION_KEYS) {
+      if (key === editingRegion) continue;
+      this._regionLayer.appendChild(this._regionOutline(regions[key], REGION_META[key].color));
+    }
 
     this._targetLayer.innerHTML = "";
     for (const t of targets) {
@@ -275,6 +263,29 @@ class AqaraFp400ZoneCard extends HTMLElement {
     root.querySelector(".hint").textContent = editingRegion
       ? `Editing the ${REGION_META[editingRegion].label} region. Click or drag to add cells, drag from a filled cell to erase, then Save.`
       : `Cells are ~50 cm; the sensor is the triangle at the bottom. Click or drag to paint the selected zone, double-click a zone chip to disable it, then Save.`;
+  }
+
+  // an SVG path tracing the perimeter of a set of cells (boundary edges only)
+  _regionOutline(cells, color) {
+    const has = (r, c) => r >= 0 && r < ROWS && c >= 0 && c < COLS && cells.has(r * COLS + c);
+    const seg = [];
+    for (const idx of cells) {
+      const r = Math.floor(idx / COLS);
+      const c = idx % COLS;
+      const yTop = ROWS - 1 - r;
+      const yBot = ROWS - r;
+      if (!has(r + 1, c)) seg.push(`M ${c} ${yTop} L ${c + 1} ${yTop}`); // toward the sensor-far side
+      if (!has(r - 1, c)) seg.push(`M ${c} ${yBot} L ${c + 1} ${yBot}`);
+      if (!has(r, c - 1)) seg.push(`M ${c} ${yTop} L ${c} ${yBot}`);
+      if (!has(r, c + 1)) seg.push(`M ${c + 1} ${yTop} L ${c + 1} ${yBot}`);
+    }
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", seg.join(" "));
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", color);
+    path.setAttribute("stroke-width", 0.16);
+    path.setAttribute("stroke-linecap", "square");
+    return path;
   }
 
   _syncLabel(state) {
