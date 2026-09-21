@@ -35,6 +35,7 @@ from .const import (
     MAX_ZONES,
     MOTION_EVENTS,
     SENSOR_ENDPOINT,
+    ZONE_POLL_S,
     cell_from_index,
     cells_to_mask,
     mask_to_cells,
@@ -181,6 +182,7 @@ class FP400Node:
     _listeners: list[Callable[[], None]] = field(default_factory=list)
     _unsubscribe: list[Callable[[], None]] = field(default_factory=list)
     _renew_task: asyncio.Task | None = None
+    _zone_task: asyncio.Task | None = None
 
     @property
     def node_id(self) -> int:
@@ -273,6 +275,9 @@ class FP400Node:
         """Subscribe to node events and attribute updates."""
         self._refresh_zones()
         self.hass.async_create_background_task(self._async_initial_zones(), f"{self.name} read zones")
+        self._zone_task = self.hass.async_create_background_task(
+            self._zone_poll_loop(), f"{self.name} poll zones"
+        )
         self._unsubscribe.append(
             self.matter_client.subscribe_events(
                 callback=self._on_node_event,
@@ -293,6 +298,9 @@ class FP400Node:
         for unsub in self._unsubscribe:
             unsub()
         self._unsubscribe.clear()
+        if self._zone_task:
+            self._zone_task.cancel()
+            self._zone_task = None
         await self.async_set_live_tracking(False)
 
     @callback
@@ -331,6 +339,21 @@ class FP400Node:
         if (zones := await self.async_read_zones()) is not None:
             self.zones = zones
             self._notify()
+
+    async def _zone_poll_loop(self) -> None:
+        """Re-read zones periodically so changes made in the Aqara app show up.
+
+        The device does not report zone (attribute 16) changes to the server's
+        subscription, so nothing else notices when zones are edited elsewhere.
+        """
+        while True:
+            await asyncio.sleep(ZONE_POLL_S)
+            if self.zones_pending:
+                continue  # a local write is being verified; don't fight it
+            zones = await self.async_read_zones()
+            if zones is not None and _zone_signature(zones) != _zone_signature(self.zones):
+                self.zones = zones
+                self._notify()
 
     async def _async_verify_zones(self, expected: list[Zone]) -> None:
         """Poll the device until its zone list matches what was written (it applies changes lazily)."""
@@ -385,7 +408,7 @@ class FP400Node:
         # data = (node_id, attribute_path, value)
         try:
             _, path, _ = data
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return
         _, cluster, attribute = (int(x) for x in path.split("/"))
         if cluster == CLUSTER_CONFIG and attribute == ATTR_ZONES:

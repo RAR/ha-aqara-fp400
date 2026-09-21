@@ -65,6 +65,7 @@ MAX_TARGETS = 3  # number of per-target x/y sensors created
 
 LOCATION_SUBSCRIPTION_S = 3600  # device maximum
 LOCATION_RENEW_S = 3300
+ZONE_POLL_S = 120  # re-read zones; the device does not push attr 16 changes (e.g. zones set in the Aqara app)
 
 ACTIVITY_STATES = {0: "unknown", 1: "active", 2: "still"}
 MOTION_EVENTS = {
