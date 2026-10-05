@@ -21,9 +21,9 @@ on a "<device> radar" device linked to the sensor's Matter device.
 ## Requirements
 
 - Home Assistant 2026.9 or newer with the Matter integration and the FP400 commissioned.
-- A Matter server that knows the FP400's vendor clusters. That is the OHF Matter Server with
-  [this change](https://github.com/matter-js/matterjs-server) (branch `aqara-fp400`, image built from `docker/matterjs-server/Dockerfile.dev`) (custom cluster `aqara.ts`) — until it is released you
-  need a server built from that branch. Reading works without it; zone commands and the position stream need it.
+- A Matter server that knows the FP400's vendor clusters: the [OHF Matter Server](https://github.com/matter-js/matterjs-server)
+  with [#1079](https://github.com/matter-js/matterjs-server/pull/1079) (merged 2026-10-05, in releases after
+  1.4.1-alpha.9). Reading works without it; zone commands and the position stream need it.
 
 ## What you get
 
