@@ -103,6 +103,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: FP400ConfigEntry) -> boo
 
     data.unsubscribe.append(client.subscribe_events(callback=_on_node_added, event_filter=EventType.NODE_ADDED))
 
+    async def _remove_node(node_id: int) -> None:
+        if (fp := data.nodes.pop(node_id, None)) is None:
+            return
+        await fp.async_stop()
+        device_registry = dr.async_get(hass)
+        if device := device_registry.async_get_device(identifiers={fp.own_identifier}):
+            device_registry.async_remove_device(device.id)  # takes its entities along
+        LOGGER.info("Removed %s (node %s)", fp.name, node_id)
+
+    @callback
+    def _on_node_removed(event: EventType, node_id: int) -> None:
+        hass.async_create_task(_remove_node(node_id))
+
+    data.unsubscribe.append(client.subscribe_events(callback=_on_node_removed, event_filter=EventType.NODE_REMOVED))
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _async_register_services(hass, entry)
     return True
@@ -115,6 +130,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: FP400ConfigEntry) -> bo
     for fp in entry.runtime_data.nodes.values():
         await fp.async_stop()
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: FP400ConfigEntry, device_entry: dr.DeviceEntry
+) -> bool:
+    """Allow deleting a radar device whose FP400 is no longer on the Matter server."""
+    return not any(fp.own_identifier in device_entry.identifiers for fp in entry.runtime_data.nodes.values())
 
 
 async def _async_register_card(hass: HomeAssistant) -> None:
