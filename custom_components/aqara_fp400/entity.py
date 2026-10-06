@@ -22,6 +22,11 @@ class FP400Entity(Entity):
         self._attr_translation_key = key
         self._attr_device_info = fp.device_info
 
+    @property
+    def available(self) -> bool:
+        """Unavailable while the Matter node is offline, like the Matter integration's own entities."""
+        return self.fp.node.available
+
     async def async_added_to_hass(self) -> None:
         """Follow node updates."""
         self.async_on_remove(self.fp.add_listener(self.async_write_ha_state, targets=self._follows_targets))

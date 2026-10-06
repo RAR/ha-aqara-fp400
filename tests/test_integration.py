@@ -268,3 +268,73 @@ async def test_region_push_updates_sensor(hass: HomeAssistant, matter_client: Ma
     await hass.async_block_till_done()
     state = hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_regions")
     assert state.attributes["regions"]["entry_exit"] == [[0, 0]]
+
+
+async def test_availability_follows_node(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:
+    """Radar entities go unavailable with the Matter node and come back with it."""
+    people = "sensor.aqara_spatial_multi_sensor_fp400_radar_tracked_people"
+    fp400.node_data.available = False
+    await trigger_subscription_callback(hass, matter_client, EventType.NODE_UPDATED, fp400, node_id=fp400.node_id)
+    assert hass.states.get(people).state == "unavailable"
+
+    fp400.node_data.available = True
+    await trigger_subscription_callback(hass, matter_client, EventType.NODE_UPDATED, fp400, node_id=fp400.node_id)
+    assert hass.states.get(people).state == "0"
+
+
+async def test_command_errors_are_readable(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:
+    """Client failures reach the user as HomeAssistantError, not an unknown error."""
+    from homeassistant.exceptions import HomeAssistantError
+    from matter_server.common.errors import InvalidCommand
+
+    matter_client.send_command.side_effect = InvalidCommand("cluster 0x115ffc0a unknown")
+    with pytest.raises(HomeAssistantError, match="cluster 0x115ffc0a unknown"):
+        await hass.services.async_call(
+            "button",
+            "press",
+            {"entity_id": "button.aqara_spatial_multi_sensor_fp400_radar_start_background_learning"},
+            blocking=True,
+        )
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(
+            "select",
+            "select_option",
+            {"entity_id": "select.aqara_spatial_multi_sensor_fp400_radar_install_mode", "option": "top_mount"},
+            blocking=True,
+        )
+
+
+async def test_location_failure_warns_once(
+    hass: HomeAssistant, matter_client: MagicMock, fp400, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A server that cannot stream locations logs one warning, not one a minute."""
+    from datetime import timedelta
+
+    from homeassistant.util import dt as dt_util
+    from tests.common import async_fire_time_changed
+
+    matter_client.send_command.side_effect = RuntimeError("no such cluster")
+    await hass.services.async_call(
+        "switch", "turn_on", {"entity_id": "switch.aqara_spatial_multi_sensor_fp400_radar_live_tracking"}, blocking=True
+    )
+    await hass.async_block_till_done()
+    for minutes in (1, 2, 3):
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=minutes, seconds=5))
+        await hass.async_block_till_done()
+    assert matter_client.send_command.call_count >= 2
+    warnings = [r for r in caplog.records if "location subscription failed" in r.message and r.levelname == "WARNING"]
+    assert len(warnings) == 1
+
+
+async def test_node_removed(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:
+    """Removing the FP400 from Matter removes the radar device and its entities."""
+    zones = "sensor.aqara_spatial_multi_sensor_fp400_radar_zones"
+    device_id = er.async_get(hass).async_get(zones).device_id
+
+    await trigger_subscription_callback(
+        hass, matter_client, EventType.NODE_REMOVED, fp400.node_id, node_id=fp400.node_id
+    )
+    await hass.async_block_till_done()
+
+    assert dr.async_get(hass).async_get(device_id) is None
+    assert er.async_get(hass).async_get(zones) is None

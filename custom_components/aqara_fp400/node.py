@@ -11,6 +11,7 @@ from typing import Any
 
 from homeassistant.components.matter.helpers import get_node_device_identifier
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.util import dt as dt_util
@@ -199,6 +200,7 @@ class FP400Node:
     _zone_task: asyncio.Task | None = None
     _renew_now: asyncio.Event = field(default_factory=asyncio.Event)
     _was_available: bool = True
+    _renew_failing: bool = False
 
     @property
     def node_id(self) -> int:
@@ -272,7 +274,7 @@ class FP400Node:
 
     async def async_write_config(self, attribute: int, value: Any) -> None:
         """Write an AmbientSensingConfiguration attribute and mirror it into the cache."""
-        result = await self.matter_client.send_command(
+        result = await self._send(
             APICommand.WRITE_ATTRIBUTE,
             node_id=self.node_id,
             attribute_path=f"{SENSOR_ENDPOINT}/{CLUSTER_CONFIG}/{attribute}",
@@ -281,7 +283,7 @@ class FP400Node:
         for entry in result or []:
             status = entry.get("Status") if isinstance(entry, dict) else None
             if status not in (None, 0):
-                raise ValueError(f"device rejected the write (status {status})")
+                raise HomeAssistantError(f"{self.name}: device rejected the write (status {status})")
         self.node.node_data.attributes[f"{SENSOR_ENDPOINT}/{CLUSTER_CONFIG}/{attribute}"] = value
         self._notify()
 
@@ -544,7 +546,10 @@ class FP400Node:
         if available and not self._was_available:
             LOGGER.debug("%s: device reconnected", self.name)
             self._kick_location_renew()
+        changed = available != self._was_available
         self._was_available = available
+        if changed:
+            self._notify()  # entities follow the device's availability
 
     @callback
     def _kick_location_renew(self) -> None:
@@ -612,8 +617,17 @@ class FP400Node:
 
     # ---- commands --------------------------------------------------------
 
+    async def _send(self, command: APICommand, **kwargs: Any) -> Any:
+        """Send through the Matter client; failures surface as readable Home Assistant errors."""
+        try:
+            return await self.matter_client.send_command(command, **kwargs)
+        except HomeAssistantError:
+            raise
+        except Exception as err:
+            raise HomeAssistantError(f"{self.name}: {err or type(err).__name__}") from err
+
     async def _command(self, cluster_id: int, command_name: str, payload: dict[str, Any] | None = None) -> Any:
-        return await self.matter_client.send_command(
+        return await self._send(
             APICommand.DEVICE_COMMAND,
             node_id=self.node_id,
             endpoint_id=SENSOR_ENDPOINT,
@@ -673,9 +687,15 @@ class FP400Node:
             try:
                 await self.async_subscribe_location()
             except Exception as err:
-                LOGGER.warning("%s: location subscription failed: %s", self.name, err)
+                # warn once; an old Matter server fails this every minute for as long as it runs
+                log = LOGGER.debug if self._renew_failing else LOGGER.warning
+                log("%s: location subscription failed (retrying every minute): %s", self.name, err)
+                self._renew_failing = True
                 delay = 60
             else:
+                if self._renew_failing:
+                    LOGGER.info("%s: location subscription restored", self.name)
+                    self._renew_failing = False
                 delay = LOCATION_RENEW_S
             # sleep until the renew is due, or earlier when the device reconnected/rebooted
             try:
@@ -700,4 +720,4 @@ class FP400Node:
                 4: "busy",
                 5: "duplicate zone id",
             }
-            raise ValueError(f"device rejected the zone command: {names.get(int(status), status)}")
+            raise HomeAssistantError(f"device rejected the zone command: {names.get(int(status), status)}")
