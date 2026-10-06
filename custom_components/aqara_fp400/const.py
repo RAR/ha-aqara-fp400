@@ -15,6 +15,7 @@ PRODUCT_ID_FP400 = 0x2009
 CLUSTER_CONFIG = 0x115FFC0A  # AmbientSensingConfiguration
 CLUSTER_RADAR = 0x115FFC0B  # RadarSensingUnion
 CLUSTER_LOCATION = 0x115FFC0C  # OccupantLocation
+CLUSTER_OCCUPANCY_SENSING = 0x0406  # attr 0 = Occupancy bitmap
 CLUSTER_BASIC_INFORMATION = 0x28  # startUp event 0 signals a reboot
 CLUSTER_GENERAL_DIAGNOSTICS = 0x33  # bootReason event 0
 

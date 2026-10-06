@@ -28,6 +28,7 @@ from .const import (
     CLUSTER_CONFIG,
     CLUSTER_GENERAL_DIAGNOSTICS,
     CLUSTER_LOCATION,
+    CLUSTER_OCCUPANCY_SENSING,
     CLUSTER_RADAR,
     DOMAIN,
     EVENT_LOCATION_INFO,
@@ -192,6 +193,7 @@ class FP400Node:
     regions_pending: dict[str, bool] = field(default_factory=dict)
     regions_error: dict[str, str | None] = field(default_factory=dict)
     _listeners: list[Callable[[], None]] = field(default_factory=list)
+    _target_listeners: list[Callable[[], None]] = field(default_factory=list)
     _unsubscribe: list[Callable[[], None]] = field(default_factory=list)
     _renew_task: asyncio.Task | None = None
     _zone_task: asyncio.Task | None = None
@@ -324,22 +326,40 @@ class FP400Node:
         if self._zone_task:
             self._zone_task.cancel()
             self._zone_task = None
-        await self.async_set_live_tracking(False)
+        # Stop the stream without touching live_tracking: notifying here would write the
+        # switch "off" right before it is removed, and that is the state a reload restores.
+        if self._renew_task:
+            self._renew_task.cancel()
+            self._renew_task = None
 
     @callback
-    def add_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
-        """Register an entity update callback."""
-        self._listeners.append(listener)
+    def add_listener(self, listener: Callable[[], None], targets: bool = False) -> Callable[[], None]:
+        """Register an entity update callback; `targets` ones also follow the position stream."""
+        listeners = self._target_listeners if targets else self._listeners
+        listeners.append(listener)
 
         def _remove() -> None:
-            self._listeners.remove(listener)
+            listeners.remove(listener)
 
         return _remove
 
     @callback
     def _notify(self) -> None:
-        for listener in self._listeners:
+        for listener in (*self._listeners, *self._target_listeners):
             listener()
+
+    @callback
+    def _notify_targets(self) -> None:
+        """Position updates arrive ~7/s; only wake the entities that show them."""
+        for listener in self._target_listeners:
+            listener()
+
+    @callback
+    def _clear_targets(self) -> None:
+        """Drop positions that no longer describe the room (no stream, or nobody there)."""
+        if self.targets:
+            self.targets = []
+            self.targets_updated = dt_util.utcnow()
 
     # ---- incoming data ---------------------------------------------------
 
@@ -544,9 +564,23 @@ class FP400Node:
             _, path, _ = data
         except (TypeError, ValueError):
             return
-        _, cluster, attribute = (int(x) for x in path.split("/"))
+        endpoint, cluster, attribute = (int(x) for x in path.split("/"))
+        if endpoint == SENSOR_ENDPOINT and (
+            (cluster == CLUSTER_RADAR and attribute == ATTR_HUMAN_COUNT and self.human_count == 0)
+            or (cluster == CLUSTER_OCCUPANCY_SENSING and attribute == 0 and not self._attr(endpoint, cluster, 0))
+        ):
+            # The stream has no "room is empty" message: the last positions would stay forever.
+            self._clear_targets()
+            self._notify()
+            return
         if cluster == CLUSTER_CONFIG and attribute == ATTR_ZONES:
-            self._refresh_zones()
+            if not self.zones_pending:  # a local write is being verified; don't show the old list
+                self._refresh_zones()
+        elif cluster == CLUSTER_CONFIG and attribute in REGIONS.values():
+            key = next(k for k, a in REGIONS.items() if a == attribute)
+            if not self.regions_pending.get(key):
+                raw = self._attr(SENSOR_ENDPOINT, CLUSTER_CONFIG, attribute)
+                self.regions[key] = self._region_cells(key, to_bytes(raw)) if raw else []
         elif cluster not in (CLUSTER_CONFIG, CLUSTER_RADAR, CLUSTER_LOCATION):
             return
         self._notify()
@@ -564,7 +598,7 @@ class FP400Node:
             raw_targets = _get(payload, "targets", 0, default=[]) if isinstance(payload, dict) else []
             self.targets = [t for t in (parse_target(item) for item in raw_targets or []) if t is not None]
             self.targets_updated = dt_util.utcnow()
-            self._notify()
+            self._notify_targets()
         elif data.cluster_id == CLUSTER_RADAR and data.event_id == EVENT_MOTION_DETECTED:
             code = _get(payload, "motion", 0, default=None) if isinstance(payload, dict) else payload
             if not isinstance(code, int | str) or (isinstance(code, str) and not code.isdigit()):
@@ -625,6 +659,8 @@ class FP400Node:
         if self._renew_task:
             self._renew_task.cancel()
             self._renew_task = None
+        if not enabled:
+            self._clear_targets()  # nothing updates them any more
         if enabled:
             self._renew_task = self.hass.async_create_background_task(
                 self._renew_loop(), f"{self.name} location stream"

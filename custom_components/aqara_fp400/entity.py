@@ -13,6 +13,7 @@ class FP400Entity(Entity):
 
     _attr_has_entity_name = True
     _attr_should_poll = False
+    _follows_targets = False  # also update on every position event
 
     def __init__(self, fp: FP400Node, key: str) -> None:
         """Set up identity and device link."""
@@ -23,4 +24,4 @@ class FP400Entity(Entity):
 
     async def async_added_to_hass(self) -> None:
         """Follow node updates."""
-        self.async_on_remove(self.fp.add_listener(self.async_write_ha_state))
+        self.async_on_remove(self.fp.add_listener(self.async_write_ha_state, targets=self._follows_targets))

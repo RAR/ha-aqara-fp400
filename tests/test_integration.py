@@ -198,3 +198,73 @@ async def test_reloads_with_matter(hass: HomeAssistant, matter_client: MagicMock
     assert own_entry.state is ConfigEntryState.LOADED
     assert matter_client.subscribe_events.call_count > setups_before
     assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_zones").state == "1"
+
+
+async def _push_attribute(hass: HomeAssistant, matter_client: MagicMock, node, path: str, value) -> None:
+    """Change a cached attribute and fire ATTRIBUTE_UPDATED the way the client does."""
+    node.node_data.attributes[path] = value
+    await trigger_subscription_callback(
+        hass,
+        matter_client,
+        EventType.ATTRIBUTE_UPDATED,
+        (node.node_id, path, value),
+        node_id=node.node_id,
+        attribute_path=path,
+    )
+
+
+async def test_live_tracking_survives_matter_reload(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:
+    """A Matter reconnect reloads us; live tracking must come back on, not restore as off."""
+    switch = "switch.aqara_spatial_multi_sensor_fp400_radar_live_tracking"
+    await hass.services.async_call("switch", "turn_on", {"entity_id": switch}, blocking=True)
+    await hass.async_block_till_done()
+
+    matter_entry = hass.config_entries.async_loaded_entries("matter")[0]
+    await hass.config_entries.async_reload(matter_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.states.get(switch).state == "on"
+    own_entry = hass.config_entries.async_loaded_entries("aqara_fp400")[0]
+    assert all(fp.live_tracking for fp in own_entry.runtime_data.nodes.values())
+
+
+async def test_targets_cleared_when_stale(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:
+    """Positions are dropped when the stream stops or the device reports an empty room."""
+    people = "sensor.aqara_spatial_multi_sensor_fp400_radar_tracked_people"
+    switch = "switch.aqara_spatial_multi_sensor_fp400_radar_live_tracking"
+    event = MatterNodeEvent(
+        node_id=fp400.node_id,
+        endpoint_id=1,
+        cluster_id=CLUSTER_LOCATION,
+        event_id=0,
+        event_number=1,
+        priority=1,
+        timestamp=0,
+        timestamp_type=0,
+        data={"targets": [{"targetId": 1, "x": 10, "y": 100, "cell": 0x0207, "activityState": 1}]},
+    )
+
+    await hass.services.async_call("switch", "turn_on", {"entity_id": switch}, blocking=True)
+    await trigger_subscription_callback(hass, matter_client, EventType.NODE_EVENT, event, node_id=fp400.node_id)
+    await hass.async_block_till_done()
+    assert hass.states.get(people).state == "1"
+
+    await _push_attribute(hass, matter_client, fp400, f"1/{CLUSTER_RADAR}/2", 0)
+    await hass.async_block_till_done()
+    assert hass.states.get(people).state == "0"
+
+    await trigger_subscription_callback(hass, matter_client, EventType.NODE_EVENT, event, node_id=fp400.node_id)
+    await hass.async_block_till_done()
+    assert hass.states.get(people).state == "1"
+    await hass.services.async_call("switch", "turn_off", {"entity_id": switch}, blocking=True)
+    assert hass.states.get(people).state == "0"
+
+
+async def test_region_push_updates_sensor(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:
+    """A region change pushed by the subscription shows up without waiting for the poll."""
+    mask = bytearray(40)
+    mask[0] = 0x80  # cell (0, 0)
+    await _push_attribute(hass, matter_client, fp400, f"1/{CLUSTER_CONFIG}/18", base64.b64encode(bytes(mask)).decode())
+    await hass.async_block_till_done()
+    state = hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_regions")
+    assert state.attributes["regions"]["entry_exit"] == [[0, 0]]

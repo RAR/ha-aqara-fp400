@@ -57,6 +57,7 @@ class ZonesSensor(FP400Entity, SensorEntity):
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:vector-square"
+    _unrecorded_attributes = frozenset({"zones", "zone_endpoints"})
 
     def __init__(self, fp: FP400Node) -> None:
         super().__init__(fp, "zones")
@@ -83,6 +84,7 @@ class RegionsSensor(FP400Entity, SensorEntity):
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:selection-drag"
+    _unrecorded_attributes = frozenset({"regions"})
 
     def __init__(self, fp: FP400Node) -> None:
         super().__init__(fp, "regions")
@@ -107,6 +109,8 @@ class TargetsSensor(FP400Entity, SensorEntity):
 
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:account-multiple"
+    _follows_targets = True
+    _unrecorded_attributes = frozenset({"targets", "updated"})
 
     def __init__(self, fp: FP400Node) -> None:
         super().__init__(fp, "targets")
@@ -133,6 +137,7 @@ class TargetAxisSensor(FP400Entity, SensorEntity):
     _attr_native_unit_of_measurement = UnitOfLength.CENTIMETERS
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_registry_enabled_default = False
+    _follows_targets = True
 
     def __init__(self, fp: FP400Node, index: int, axis: str) -> None:
         super().__init__(fp, f"target_{index + 1}_{axis}")
