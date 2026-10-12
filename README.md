@@ -24,6 +24,13 @@ on a "<device> radar" device linked to the sensor's Matter device.
 - A Matter server that knows the FP400's vendor clusters: the [OHF Matter Server](https://github.com/matter-js/matterjs-server)
   with [#1079](https://github.com/matter-js/matterjs-server/pull/1079) (merged 2026-10-05, in releases after
   1.4.1-alpha.9). Reading works without it; zone commands and the position stream need it.
+- **A Matter fabric with a vendor ID the FP400 trusts.** The device answers every explicit read, write and command on its
+  vendor clusters with `UnsupportedAttribute` (status 134) when the fabric's vendor ID is 0x134B — the Nabu Casa ID the
+  Home Assistant Matter Server add-on commissions with — even though it advertises the attributes. Plain occupancy and
+  the scalar attributes still arrive, but zones, regions, settings writes and the position stream fail. It works from a
+  fabric with the Matter test vendor ID 0xFFF1, which is the OHF Matter Server's default when run standalone: run it as
+  its own container (not the add-on), point the Matter integration at it, and commission the FP400 onto that fabric.
+  No Aqara Home setup is needed. Other vendor IDs (0x115F, Amazon, Apple) are untested.
 
 ## What you get
 
