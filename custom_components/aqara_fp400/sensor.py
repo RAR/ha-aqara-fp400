@@ -183,7 +183,11 @@ class ActivityStateSensor(FP400Entity, SensorEntity):
         super().__init__(fp, "activity_state")
 
     @property
-    def native_value(self) -> str:
+    def available(self) -> bool:
+        return self.fp.activity_state_available
+
+    @property
+    def native_value(self) -> str | None:
         return self.fp.activity_state
 
 
@@ -195,6 +199,10 @@ class HumanCountSensor(FP400Entity, SensorEntity):
 
     def __init__(self, fp: FP400Node) -> None:
         super().__init__(fp, "human_count")
+
+    @property
+    def available(self) -> bool:
+        return self.fp.human_count_available
 
     @property
     def native_value(self) -> int | None:
