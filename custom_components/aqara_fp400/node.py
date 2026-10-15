@@ -6,7 +6,7 @@ import asyncio
 import base64
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.components.matter.helpers import get_node_device_identifier
@@ -50,6 +50,14 @@ from .const import (
     mask_to_cells,
     to_bytes,
 )
+
+
+NATIVE_ACTIVITY_PATH = f"{SENSOR_ENDPOINT}/{CLUSTER_LOCATION}/{ATTR_ACTIVITY_STATE}"
+NATIVE_HUMAN_COUNT_PATH = f"{SENSOR_ENDPOINT}/{CLUSTER_RADAR}/{ATTR_HUMAN_COUNT}"
+NATIVE_ATTRIBUTE_PATHS = (NATIVE_ACTIVITY_PATH, NATIVE_HUMAN_COUNT_PATH)
+NATIVE_POLL_INTERVAL_S = 5
+NATIVE_READ_TIMEOUT_S = 5
+NATIVE_ATTRIBUTE_MAX_AGE_S = 20
 
 
 @dataclass
@@ -198,6 +206,12 @@ class FP400Node:
     _unsubscribe: list[Callable[[], None]] = field(default_factory=list)
     _renew_task: asyncio.Task | None = None
     _zone_task: asyncio.Task | None = None
+    _native_poll_task: asyncio.Task | None = None
+    _native_values: dict[str, Any] = field(default_factory=dict)
+    _native_updated: dict[str, datetime] = field(default_factory=dict)
+    _native_generations: dict[str, int] = field(default_factory=dict)
+    _native_notified_snapshot: dict[str, tuple[bool, Any]] | None = None
+    _native_poll_error_logged: bool = False
     _renew_now: asyncio.Event = field(default_factory=asyncio.Event)
     _was_available: bool = True
     _renew_failing: bool = False
@@ -243,18 +257,60 @@ class FP400Node:
         return int(self._attr(SENSOR_ENDPOINT, CLUSTER_CONFIG, ATTR_MAX_ZONES) or MAX_ZONES)
 
     @property
-    def activity_state(self) -> str:
+    def activity_state(self) -> str | None:
         """Overall activity state."""
-        value = self._attr(SENSOR_ENDPOINT, CLUSTER_LOCATION, ATTR_ACTIVITY_STATE)
-        return ACTIVITY_STATES.get(int(value or 0), "unknown")
+        value = self._native_attribute_value(NATIVE_ACTIVITY_PATH)
+        return ACTIVITY_STATES[value] if value is not None else None
 
     @property
     def human_count(self) -> int | None:
         """CurrentHumanCount; 255 means unknown."""
-        value = self._attr(SENSOR_ENDPOINT, CLUSTER_RADAR, ATTR_HUMAN_COUNT)
-        if value is None or int(value) == 255:
-            return None
-        return int(value)
+        value = self._native_attribute_value(NATIVE_HUMAN_COUNT_PATH)
+        return value if value is not None else None
+
+    @property
+    def activity_state_available(self) -> bool:
+        """Whether a recent, valid native ActivityState value is available."""
+        return self._native_attribute_available(NATIVE_ACTIVITY_PATH)
+
+    @property
+    def human_count_available(self) -> bool:
+        """Whether a recent, valid native CurrentHumanCount value is available."""
+        return self._native_attribute_available(NATIVE_HUMAN_COUNT_PATH)
+
+    @staticmethod
+    def _valid_native_attribute(path: str, value: Any) -> bool:
+        if isinstance(value, bool) or not isinstance(value, int):
+            return False
+        if path == NATIVE_ACTIVITY_PATH:
+            return value in ACTIVITY_STATES
+        if path == NATIVE_HUMAN_COUNT_PATH:
+            return 0 <= value < 255
+        return False
+
+    def _native_attribute_available(self, path: str) -> bool:
+        updated = self._native_updated.get(path)
+        if not self.node.available or updated is None:
+            return False
+        if dt_util.utcnow() - updated > timedelta(seconds=NATIVE_ATTRIBUTE_MAX_AGE_S):
+            return False
+        return self._valid_native_attribute(path, self._native_values.get(path))
+
+    def _native_attribute_value(self, path: str) -> Any:
+        return self._native_values.get(path) if self._native_attribute_available(path) else None
+
+    def _native_reporting_snapshot(self) -> dict[str, tuple[bool, Any]]:
+        snapshot = {}
+        for path in NATIVE_ATTRIBUTE_PATHS:
+            available = self._native_attribute_available(path)
+            snapshot[path] = (available, self._native_values.get(path) if available else None)
+        return snapshot
+
+    @callback
+    def _record_native_attribute(self, path: str, value: Any) -> None:
+        self._native_values[path] = value
+        self._native_updated[path] = dt_util.utcnow()
+        self._native_generations[path] = self._native_generations.get(path, 0) + 1
 
     def zone_endpoints(self) -> dict[int, int]:
         """Map zone id -> child endpoint id."""
@@ -297,6 +353,7 @@ class FP400Node:
         self._zone_task = self.hass.async_create_background_task(
             self._zone_poll_loop(), f"{self.name} poll zones and regions"
         )
+        self._ensure_native_poll_task()
         self._unsubscribe.append(
             self.matter_client.subscribe_events(
                 callback=self._on_node_event,
@@ -321,7 +378,7 @@ class FP400Node:
         )
 
     async def async_stop(self) -> None:
-        """Tear down subscriptions and the renew task."""
+        """Tear down subscriptions and background tasks."""
         for unsub in self._unsubscribe:
             unsub()
         self._unsubscribe.clear()
@@ -333,6 +390,76 @@ class FP400Node:
         if self._renew_task:
             self._renew_task.cancel()
             self._renew_task = None
+        if self._native_poll_task:
+            task = self._native_poll_task
+            self._native_poll_task = None
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    def _ensure_native_poll_task(self) -> None:
+        """Create at most one poll task for these two vendor attributes."""
+        if self._native_poll_task is None or self._native_poll_task.done():
+            self._native_poll_task = self.hass.async_create_background_task(
+                self._native_attribute_poll_loop(), f"{self.name} poll native sensor attributes"
+            )
+
+    async def _native_attribute_poll_loop(self) -> None:
+        """Refresh native sensor values whose subscribed updates may be absent."""
+        while True:
+            if self.node.available:
+                await self._async_refresh_native_attributes()
+            await asyncio.sleep(NATIVE_POLL_INTERVAL_S)
+
+    async def _async_refresh_native_attributes(self) -> None:
+        """Read the native values without changing Matter's shared subscription cache."""
+        if not self.node.available:
+            self._notify_native_if_changed()
+            return
+        generations = {path: self._native_generations.get(path, 0) for path in NATIVE_ATTRIBUTE_PATHS}
+        try:
+            result = await asyncio.wait_for(
+                self.matter_client.read_attribute(self.node_id, list(NATIVE_ATTRIBUTE_PATHS)),
+                timeout=NATIVE_READ_TIMEOUT_S,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:
+            if not self._native_poll_error_logged:
+                LOGGER.warning("%s: reading native sensor attributes failed: %s", self.name, err)
+            self._native_poll_error_logged = True
+            self._notify_native_if_changed()
+            return
+
+        if not isinstance(result, dict):
+            if not self._native_poll_error_logged:
+                LOGGER.warning("%s: reading native sensor attributes returned no attribute map", self.name)
+            self._native_poll_error_logged = True
+            self._notify_native_if_changed()
+            return
+
+        for path in NATIVE_ATTRIBUTE_PATHS:
+            if path in result and self._native_generations.get(path, 0) == generations[path]:
+                self._record_native_attribute(path, result[path])
+
+        missing = set(NATIVE_ATTRIBUTE_PATHS).difference(result)
+        if missing:
+            if not self._native_poll_error_logged:
+                LOGGER.warning("%s: native sensor read omitted attribute paths %s", self.name, sorted(missing))
+            self._native_poll_error_logged = True
+        elif self._native_poll_error_logged:
+            LOGGER.info("%s: native sensor attribute reads recovered", self.name)
+            self._native_poll_error_logged = False
+
+        self._notify_native_if_changed()
+
+    def _notify_native_if_changed(self) -> None:
+        """Notify for value changes and freshness transitions since the last entity update."""
+        current = self._native_reporting_snapshot()
+        if current != self._native_notified_snapshot:
+            self._notify()
 
     @callback
     def add_listener(self, listener: Callable[[], None], targets: bool = False) -> Callable[[], None]:
@@ -347,6 +474,7 @@ class FP400Node:
 
     @callback
     def _notify(self) -> None:
+        self._native_notified_snapshot = self._native_reporting_snapshot()
         for listener in (*self._listeners, *self._target_listeners):
             listener()
 
@@ -566,9 +694,11 @@ class FP400Node:
     def _handle_attribute_updated(self, data: Any) -> None:
         # data = (node_id, attribute_path, value)
         try:
-            _, path, _ = data
+            _, path, value = data
         except (TypeError, ValueError):
             return
+        if path in NATIVE_ATTRIBUTE_PATHS:
+            self._record_native_attribute(path, value)
         endpoint, cluster, attribute = (int(x) for x in path.split("/"))
         if endpoint == SENSOR_ENDPOINT and (
             (cluster == CLUSTER_RADAR and attribute == ATTR_HUMAN_COUNT and self.human_count == 0)

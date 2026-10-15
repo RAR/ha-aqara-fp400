@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 from homeassistant.core import HomeAssistant
@@ -12,6 +14,7 @@ from matter_server.common.models import APICommand, EventType, MatterNodeEvent
 import pytest
 from tests.common import MockConfigEntry
 
+from custom_components.aqara_fp400.node import NATIVE_ACTIVITY_PATH, NATIVE_HUMAN_COUNT_PATH
 from .common import setup_integration_with_node_fixture, trigger_subscription_callback
 
 CLUSTER_CONFIG = 0x115FFC0A
@@ -211,6 +214,175 @@ async def _push_attribute(hass: HomeAssistant, matter_client: MagicMock, node, p
         node_id=node.node_id,
         attribute_path=path,
     )
+
+
+def _fp400_node(hass: HomeAssistant):
+    entry = hass.config_entries.async_loaded_entries("aqara_fp400")[0]
+    return next(iter(entry.runtime_data.nodes.values()))
+
+
+async def test_native_sensors_use_reported_values_without_changing_matter_cache(
+    hass: HomeAssistant, matter_client: MagicMock, fp400
+) -> None:
+    """Native reads update the FP400 sensors without writing Matter's shared cache."""
+    fp = _fp400_node(hass)
+    cached_attributes = dict(fp400.node_data.attributes)
+    matter_client.read_attribute.return_value = {NATIVE_ACTIVITY_PATH: 1, NATIVE_HUMAN_COUNT_PATH: 1}
+
+    await fp._async_refresh_native_attributes()
+    await hass.async_block_till_done()
+
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_activity_state").state == "active"
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_human_count").state == "1"
+    assert fp400.node_data.attributes == cached_attributes
+    assert any(
+        call.args == (fp.node_id, [NATIVE_ACTIVITY_PATH, NATIVE_HUMAN_COUNT_PATH])
+        for call in matter_client.read_attribute.call_args_list
+    )
+
+
+async def test_pushed_native_value_wins_over_an_older_poll_response(
+    hass: HomeAssistant, matter_client: MagicMock, fp400
+) -> None:
+    """A native attribute push during a read cannot be overwritten by that stale read."""
+    fp = _fp400_node(hass)
+    read_started = asyncio.Event()
+    release_read = asyncio.Event()
+
+    async def delayed_read(*args, **kwargs):
+        read_started.set()
+        await release_read.wait()
+        return {NATIVE_ACTIVITY_PATH: 1, NATIVE_HUMAN_COUNT_PATH: 1}
+
+    matter_client.read_attribute.side_effect = delayed_read
+    read_task = asyncio.create_task(fp._async_refresh_native_attributes())
+    await asyncio.wait_for(read_started.wait(), timeout=1)
+    await _push_attribute(hass, matter_client, fp400, NATIVE_ACTIVITY_PATH, 2)
+    release_read.set()
+    await read_task
+    matter_client.read_attribute.side_effect = None
+    await hass.async_block_till_done()
+
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_activity_state").state == "still"
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_human_count").state == "1"
+
+
+async def test_native_sensor_values_expire_per_field_and_invalid_values_stay_unavailable(
+    hass: HomeAssistant, matter_client: MagicMock, fp400, monkeypatch
+) -> None:
+    """Partial reads preserve only fresh fields; zero is valid and None/255 are unavailable."""
+    from custom_components.aqara_fp400 import node as node_module
+
+    fp = _fp400_node(hass)
+    now = [datetime(2026, 1, 1, tzinfo=timezone.utc)]
+    monkeypatch.setattr(node_module.dt_util, "utcnow", lambda: now[0])
+    matter_client.read_attribute.return_value = {NATIVE_ACTIVITY_PATH: 0, NATIVE_HUMAN_COUNT_PATH: 0}
+    await fp._async_refresh_native_attributes()
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_activity_state").state == "unknown"
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_human_count").state == "0"
+
+    now[0] += timedelta(seconds=10)
+    matter_client.read_attribute.return_value = {NATIVE_HUMAN_COUNT_PATH: 1}
+    await fp._async_refresh_native_attributes()
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_activity_state").state == "unknown"
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_human_count").state == "1"
+
+    now[0] += timedelta(seconds=11)
+    matter_client.read_attribute.return_value = {}
+    await fp._async_refresh_native_attributes()
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_activity_state").state == "unavailable"
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_human_count").state == "1"
+
+    now[0] += timedelta(seconds=10)
+    matter_client.read_attribute.side_effect = RuntimeError("temporary read failure")
+    await fp._async_refresh_native_attributes()
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_human_count").state == "unavailable"
+
+    matter_client.read_attribute.side_effect = None
+    matter_client.read_attribute.return_value = {NATIVE_ACTIVITY_PATH: None, NATIVE_HUMAN_COUNT_PATH: 255}
+    await fp._async_refresh_native_attributes()
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_activity_state").state == "unavailable"
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_human_count").state == "unavailable"
+
+
+async def test_native_sensors_notify_when_last_successful_values_expire(
+    hass: HomeAssistant, matter_client: MagicMock, fp400, monkeypatch
+) -> None:
+    """A failed read after the freshness deadline publishes unavailable to HA."""
+    from custom_components.aqara_fp400 import node as node_module
+
+    fp = _fp400_node(hass)
+    now = [datetime(2026, 1, 1, tzinfo=timezone.utc)]
+    monkeypatch.setattr(node_module.dt_util, "utcnow", lambda: now[0])
+    matter_client.read_attribute.return_value = {NATIVE_ACTIVITY_PATH: 1, NATIVE_HUMAN_COUNT_PATH: 1}
+
+    await fp._async_refresh_native_attributes()
+    await hass.async_block_till_done()
+    activity_entity = "sensor.aqara_spatial_multi_sensor_fp400_radar_activity_state"
+    count_entity = "sensor.aqara_spatial_multi_sensor_fp400_radar_human_count"
+    assert hass.states.get(activity_entity).state == "active"
+    assert hass.states.get(count_entity).state == "1"
+
+    # The getters already see these as stale when the next read begins. That read
+    # fails, so HA still needs an update signal for the old recorded entity states.
+    now[0] += timedelta(seconds=21)
+    matter_client.read_attribute.return_value = {}
+    await fp._async_refresh_native_attributes()
+    await hass.async_block_till_done()
+
+    assert hass.states.get(activity_entity).state == "unavailable"
+    assert hass.states.get(count_entity).state == "unavailable"
+
+
+async def test_native_sensors_follow_node_availability_and_recover(
+    hass: HomeAssistant, matter_client: MagicMock, fp400
+) -> None:
+    """Native sensors turn unavailable with Matter and return after a fresh read."""
+    fp = _fp400_node(hass)
+    matter_client.read_attribute.return_value = {NATIVE_ACTIVITY_PATH: 1, NATIVE_HUMAN_COUNT_PATH: 1}
+    await fp._async_refresh_native_attributes()
+    await hass.async_block_till_done()
+
+    fp400.node_data.available = False
+    await trigger_subscription_callback(hass, matter_client, EventType.NODE_UPDATED, fp400, node_id=fp400.node_id)
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_activity_state").state == "unavailable"
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_human_count").state == "unavailable"
+
+    fp400.node_data.available = True
+    await trigger_subscription_callback(hass, matter_client, EventType.NODE_UPDATED, fp400, node_id=fp400.node_id)
+    matter_client.read_attribute.return_value = {NATIVE_ACTIVITY_PATH: 2, NATIVE_HUMAN_COUNT_PATH: 0}
+    await fp._async_refresh_native_attributes()
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_activity_state").state == "still"
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_human_count").state == "0"
+
+
+async def test_native_poll_task_is_unique_and_cancelled_during_read(
+    matter_client: MagicMock, hass: HomeAssistant, fp400
+) -> None:
+    """The native polling task is not duplicated and is awaited when stopped in a read."""
+    fp = _fp400_node(hass)
+    await fp.async_stop()
+    read_started = asyncio.Event()
+
+    async def blocked_read(*args, **kwargs):
+        read_started.set()
+        await asyncio.Event().wait()
+
+    matter_client.read_attribute.side_effect = blocked_read
+    fp._ensure_native_poll_task()
+    task = fp._native_poll_task
+    fp._ensure_native_poll_task()
+    assert fp._native_poll_task is task
+
+    await asyncio.wait_for(read_started.wait(), timeout=1)
+    await fp.async_stop()
+    assert task is not None and task.cancelled()
 
 
 async def test_live_tracking_survives_matter_reload(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:
