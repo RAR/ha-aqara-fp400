@@ -201,13 +201,17 @@ async def test_reloads_with_matter(hass: HomeAssistant, matter_client: MagicMock
 
 
 async def _push_attribute(hass: HomeAssistant, matter_client: MagicMock, node, path: str, value) -> None:
-    """Change a cached attribute and fire ATTRIBUTE_UPDATED the way the client does."""
+    """Change a cached attribute and fire ATTRIBUTE_UPDATED the way the client does.
+
+    The client stores the value first, then calls subscribers with only the value; the
+    path reaches us solely through the subscription's attr_path_filter.
+    """
     node.node_data.attributes[path] = value
     await trigger_subscription_callback(
         hass,
         matter_client,
         EventType.ATTRIBUTE_UPDATED,
-        (node.node_id, path, value),
+        value,
         node_id=node.node_id,
         attribute_path=path,
     )

@@ -7,6 +7,7 @@ import base64
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import partial
 from typing import Any
 
 from homeassistant.components.matter.helpers import get_node_device_identifier
@@ -44,6 +45,7 @@ from .const import (
     MOTION_EVENTS,
     REGIONS,
     SENSOR_ENDPOINT,
+    WATCHED_ATTRIBUTES,
     ZONE_POLL_S,
     cell_from_index,
     cells_to_mask,
@@ -304,13 +306,15 @@ class FP400Node:
                 node_filter=self.node_id,
             )
         )
-        self._unsubscribe.append(
-            self.matter_client.subscribe_events(
-                callback=self._on_attribute_updated,
-                event_filter=EventType.ATTRIBUTE_UPDATED,
-                node_filter=self.node_id,
+        for cluster, attribute in WATCHED_ATTRIBUTES:
+            self._unsubscribe.append(
+                self.matter_client.subscribe_events(
+                    callback=partial(self._on_attribute_updated, cluster, attribute),
+                    event_filter=EventType.ATTRIBUTE_UPDATED,
+                    node_filter=self.node_id,
+                    attr_path_filter=f"{SENSOR_ENDPOINT}/{cluster}/{attribute}",
+                )
             )
-        )
         self._was_available = self.node.available
         self._unsubscribe.append(
             self.matter_client.subscribe_events(
@@ -531,13 +535,13 @@ class FP400Node:
         self._notify()
 
     @callback
-    def _on_attribute_updated(self, event: EventType, data: Any) -> None:
+    def _on_attribute_updated(self, cluster: int, attribute: int, event: EventType, value: Any) -> None:
         # The client runs subscribers inside its listen loop: an exception here drops the
         # whole server connection, so never let one escape.
         try:
-            self._handle_attribute_updated(data)
+            self._handle_attribute_updated(cluster, attribute)
         except Exception:
-            LOGGER.exception("%s: failed to handle attribute update %s", self.name, data)
+            LOGGER.exception("%s: failed to handle update of %s/%s = %s", self.name, cluster, attribute, value)
 
     @callback
     def _on_node_updated(self, event: EventType, node: MatterNode) -> None:
@@ -563,16 +567,10 @@ class FP400Node:
         except Exception:
             LOGGER.exception("%s: failed to handle node event %s", self.name, data)
 
-    def _handle_attribute_updated(self, data: Any) -> None:
-        # data = (node_id, attribute_path, value)
-        try:
-            _, path, _ = data
-        except (TypeError, ValueError):
-            return
-        endpoint, cluster, attribute = (int(x) for x in path.split("/"))
-        if endpoint == SENSOR_ENDPOINT and (
-            (cluster == CLUSTER_RADAR and attribute == ATTR_HUMAN_COUNT and self.human_count == 0)
-            or (cluster == CLUSTER_OCCUPANCY_SENSING and attribute == 0 and not self._attr(endpoint, cluster, 0))
+    def _handle_attribute_updated(self, cluster: int, attribute: int) -> None:
+        # The client has already stored the new value in node_data; read it from there.
+        if (cluster == CLUSTER_RADAR and attribute == ATTR_HUMAN_COUNT and self.human_count == 0) or (
+            cluster == CLUSTER_OCCUPANCY_SENSING and not self._attr(SENSOR_ENDPOINT, cluster, 0)
         ):
             # The stream has no "room is empty" message: the last positions would stay forever.
             self._clear_targets()
@@ -586,8 +584,6 @@ class FP400Node:
             if not self.regions_pending.get(key):
                 raw = self._attr(SENSOR_ENDPOINT, CLUSTER_CONFIG, attribute)
                 self.regions[key] = self._region_cells(key, to_bytes(raw)) if raw else []
-        elif cluster not in (CLUSTER_CONFIG, CLUSTER_RADAR, CLUSTER_LOCATION):
-            return
         self._notify()
 
     def _handle_node_event(self, data: MatterNodeEvent) -> None:

@@ -72,6 +72,34 @@ EVENT_MOTION_DETECTED = 0
 
 SENSOR_ENDPOINT = 1
 
+# Attributes on the sensor endpoint whose pushed updates the node reacts to. The Matter client
+# hands subscribers only the new value, so each path gets its own subscription.
+WATCHED_ATTRIBUTES: tuple[tuple[int, int], ...] = (
+    *(
+        (CLUSTER_CONFIG, attr)
+        for attr in (
+            ATTR_INSTALL_MODE,
+            ATTR_SIDE_INSTALL,
+            ATTR_INSTALL_HEIGHT,
+            ATTR_INSTALL_HEIGHT_MIN,
+            ATTR_INSTALL_HEIGHT_MAX,
+            ATTR_INSTALL_STATUS,
+            ATTR_INSTALL_ANGLE,
+            ATTR_ZONES,
+            ATTR_MAX_ZONES,
+            ATTR_ENTRY_EXIT_REGION,
+            ATTR_INTERFERENCE_REGION,
+            ATTR_MONITORING_REGION,
+            ATTR_COORDINATE_REVERSE,
+            ATTR_DETECTION_DIRECTION,
+            ATTR_PROXIMITY_LEVEL,
+        )
+    ),
+    (CLUSTER_RADAR, ATTR_HUMAN_COUNT),
+    (CLUSTER_LOCATION, ATTR_ACTIVITY_STATE),
+    (CLUSTER_OCCUPANCY_SENSING, 0),
+)
+
 # Detection grid: 16 columns x 20 rows of ~50 cm cells, row 0 nearest the sensor,
 # column 8 straight ahead (columns grow as x decreases). bit = row * COLS + col, MSB first.
 # Verified 2026-09-19 with single-column zones against the device's own zone assignment.
