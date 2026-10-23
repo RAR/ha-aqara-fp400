@@ -6,6 +6,9 @@ the parts the Aqara app does (when it works) that plain Matter does not expose.
 It rides on Home Assistant's Matter integration: same server connection, same fabric, no extra pairing. Entities land
 on a "<device> radar" device linked to the sensor's Matter device.
 
+Running the FP400 on Zigbee instead? This integration does not apply; see
+[bobtekkk/aqara-fp400-zone-card](https://github.com/bobtekkk/aqara-fp400-zone-card) (Zigbee2MQTT converter + card).
+
 <p align="center">
   <img src="docs/zone-card.png" alt="The zone card: sensor at the top, a painted zone with a tracked person in it, the monitoring range outlined" width="360">
 </p>
