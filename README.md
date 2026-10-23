@@ -65,6 +65,9 @@ on a "<device> radar" device linked to the sensor's Matter device.
 Zones themselves show up through the Matter integration as extra occupancy sensors (one child endpoint per zone) after
 a re-interview of the node — they are motion-triggered with the zone's own hold time.
 
+To get rid of the integration, delete its entry (Settings → Devices & services → Aqara FP400 → ⋮ → Delete). Deleting
+just the radar *device* is refused while the FP400 is still on the Matter server, since it would come back on reload.
+
 ## Services
 
 ```yaml
