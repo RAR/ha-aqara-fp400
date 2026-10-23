@@ -659,6 +659,14 @@ class FP400Node:
         """Kick off the AI space background learning."""
         await self._command(CLUSTER_CONFIG, "EnableAiSpaceBackgroundLearning")
 
+    async def async_remove_target(self, target_id: int) -> None:
+        """Make the device drop one tracked target (a ghost); a real person is picked up again."""
+        self._check_status(await self._command(CLUSTER_LOCATION, "RemoveDetectionTarget", {"targetId": target_id}))
+        if any(t.target_id == target_id for t in self.targets):
+            self.targets = [t for t in self.targets if t.target_id != target_id]
+            self.targets_updated = dt_util.utcnow()
+            self._notify_targets()
+
     async def async_subscribe_location(self, timeout: int = LOCATION_SUBSCRIPTION_S) -> None:
         """Ask the device to stream LocationInfo events for `timeout` seconds."""
         await self._command(CLUSTER_LOCATION, "SubscribeLocationData", {"timeout": timeout})
@@ -716,4 +724,4 @@ class FP400Node:
                 4: "busy",
                 5: "duplicate zone id",
             }
-            raise HomeAssistantError(f"device rejected the zone command: {names.get(int(status), status)}")
+            raise HomeAssistantError(f"device rejected the command: {names.get(int(status), status)}")

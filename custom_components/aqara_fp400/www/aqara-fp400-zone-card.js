@@ -101,7 +101,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
         .sensor-halo { fill: var(--primary-text-color); fill-opacity: 0.08; }
         .region-outline { fill: none; stroke-width: 0.16; stroke-linecap: square; stroke-linejoin: round; }
         .region-outline.dim { stroke-opacity: 0.55; }
-        .target { fill: var(--primary-color); stroke: var(--card-background-color, #fff); stroke-width: 0.1; }
+        .target { fill: var(--primary-color); stroke: var(--card-background-color, #fff); stroke-width: 0.1; cursor: pointer; }
         .target.still { fill: var(--card-background-color, #fff); stroke: var(--primary-color); stroke-width: 0.12; }
         .target-halo { fill: var(--primary-color); fill-opacity: 0.18; }
 
@@ -368,6 +368,8 @@ class AqaraFp400ZoneCard extends HTMLElement {
       const title = this._el("title");
       title.textContent = `Person ${t.id}: ${(t.y / 100).toFixed(1)} m ahead, ${Math.abs(t.x / 100).toFixed(1)} m ${t.x < 0 ? "right" : "left"}, ${t.activity}${t.zones?.length ? ", in zone " + t.zones.join(", ") : ""}`;
       dot.appendChild(title);
+      // a click on a dot offers to forget it (ghosts); stop it reaching the painting handler
+      dot.addEventListener("pointerdown", (ev) => { ev.stopPropagation(); this._forget = t.id; this._controlsKey = null; this._render(); });
       this._targetLayer.appendChild(dot);
     }
 
@@ -375,7 +377,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
     // second while live tracking is on, and replacing a button between mousedown and mouseup
     // swallows the click.
     const key = JSON.stringify([
-      this._mode, this._active, !!this._saving, !!this._edit, this._regionEdit?.key, !!this._confirmedEmpty,
+      this._mode, this._active, !!this._saving, !!this._edit, this._regionEdit?.key, !!this._confirmedEmpty, this._forget,
       [...zones].map(([id, z]) => [id, z.cells.size, z.enabled]),
       REGION_KEYS.map((k) => regions[k].size),
       state?.attributes?.max_zones,
@@ -461,6 +463,32 @@ class AqaraFp400ZoneCard extends HTMLElement {
     panel.className = "panel";
     if (this._mode === "zones") this._zoneTools(tools, panel, zones, state);
     else this._regionTools(tools, panel, regions);
+    if (this._forget != null) this._forgetPanel(panel);
+  }
+
+  // offered after a click on a target dot: the sensor drops that track (a real person comes back)
+  _forgetPanel(panel) {
+    const id = this._forget;
+    panel.innerHTML = `<span class="name">Person ${id}</span>
+      <span class="meta">Forget this target? The sensor drops it; a real person is picked up again within seconds. For a spot that keeps producing ghosts, paint it into the interference region.</span><span class="spacer"></span>`;
+    const group = document.createElement("span");
+    group.className = "btns";
+    const cancel = document.createElement("button");
+    cancel.className = "secondary small";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", () => { this._forget = null; this._render(); });
+    group.appendChild(cancel);
+    const forget = document.createElement("button");
+    forget.className = "secondary small danger";
+    forget.textContent = "Forget";
+    forget.disabled = this._saving;
+    forget.addEventListener("click", async () => {
+      await this._runService("remove_target", { target_id: id });
+      this._forget = null;
+      this._render();
+    });
+    group.appendChild(forget);
+    panel.appendChild(group);
   }
 
   _zoneTools(tools, panel, zones, state) {

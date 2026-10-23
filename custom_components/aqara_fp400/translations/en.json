@@ -210,6 +210,20 @@
           "description": "Which region to clear."
         }
       }
+    },
+    "remove_target": {
+      "name": "Forget a tracked target",
+      "description": "Makes the sensor drop one tracked target, e.g. a ghost from a fan or curtain. A real person is detected again within seconds.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "The FP400."
+        },
+        "target_id": {
+          "name": "Target",
+          "description": "The target's id, as shown by the tracked people sensor."
+        }
+      }
     }
   }
 }

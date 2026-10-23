@@ -133,6 +133,7 @@ SERVICE_SET_REGION = "set_region"
 SERVICE_CLEAR_REGION = "clear_region"
 SERVICE_SUBSCRIBE_LOCATION = "subscribe_location"
 SERVICE_START_LEARNING = "start_learning"
+SERVICE_REMOVE_TARGET = "remove_target"
 
 
 def cells_to_mask(cells: Iterable[tuple[int, int]]) -> bytes:

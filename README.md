@@ -83,7 +83,9 @@ data:
 ```
 
 `aqara_fp400.clear_zones`, `aqara_fp400.subscribe_location` (timeout in seconds, max 3600) and
-`aqara_fp400.start_learning` take just `device_id`.
+`aqara_fp400.start_learning` take just `device_id`. `aqara_fp400.remove_target` (`device_id`, `target_id`) makes the
+sensor drop one tracked target — a ghost from a fan or curtain; a real person is picked up again within seconds. The
+card does the same when you click a dot on the map; to silence a spot for good, paint it into the interference region.
 
 Regions (the entry/exit, interference and monitoring-range areas, drawn as cell masks on the same grid) are set the
 same way:

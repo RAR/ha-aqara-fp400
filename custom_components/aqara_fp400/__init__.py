@@ -33,6 +33,7 @@ from .const import (
     REGIONS,
     SERVICE_CLEAR_REGION,
     SERVICE_CLEAR_ZONES,
+    SERVICE_REMOVE_TARGET,
     SERVICE_SET_REGION,
     SERVICE_SET_ZONES,
     SERVICE_START_LEARNING,
@@ -231,6 +232,12 @@ CLEAR_REGION_SCHEMA = vol.Schema(
         vol.Required("region"): vol.In(list(REGIONS)),
     }
 )
+REMOVE_TARGET_SCHEMA = vol.Schema(
+    {
+        vol.Required("device_id"): cv.string,
+        vol.Required("target_id"): vol.All(vol.Coerce(int), vol.Range(min=0, max=255)),
+    }
+)
 SUBSCRIBE_SCHEMA = vol.Schema(
     {
         vol.Required("device_id"): cv.string,
@@ -291,6 +298,10 @@ def _async_register_services(hass: HomeAssistant, entry: FP400ConfigEntry) -> No
         fp = _node_for_device(hass, call.data["device_id"])
         await fp.async_start_learning()
 
+    async def remove_target(call: ServiceCall) -> None:
+        fp = _node_for_device(hass, call.data["device_id"])
+        await fp.async_remove_target(call.data["target_id"])
+
     hass.services.async_register(
         DOMAIN, SERVICE_SET_ZONES, set_zones, schema=SET_ZONES_SCHEMA, supports_response=SupportsResponse.OPTIONAL
     )
@@ -299,3 +310,4 @@ def _async_register_services(hass: HomeAssistant, entry: FP400ConfigEntry) -> No
     hass.services.async_register(DOMAIN, SERVICE_CLEAR_REGION, clear_region, schema=CLEAR_REGION_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_SUBSCRIBE_LOCATION, subscribe_location, schema=SUBSCRIBE_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_START_LEARNING, start_learning, schema=DEVICE_SCHEMA)
+    hass.services.async_register(DOMAIN, SERVICE_REMOVE_TARGET, remove_target, schema=REMOVE_TARGET_SCHEMA)

@@ -91,3 +91,19 @@ start_learning:
           filter:
             - integration: aqara_fp400
             - integration: matter
+remove_target:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          filter:
+            - integration: aqara_fp400
+            - integration: matter
+    target_id:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 255
+          mode: box

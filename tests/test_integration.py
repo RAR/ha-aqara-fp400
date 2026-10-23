@@ -91,6 +91,19 @@ async def test_location_event(hass: HomeAssistant, matter_client: MagicMock, fp4
     assert state.attributes["targets"][0]["col"] == 7
     assert state.attributes["targets"][0]["activity"] == "active"
 
+    # forgetting a target sends the command and drops it locally
+    device_id = er.async_get(hass).async_get("sensor.aqara_spatial_multi_sensor_fp400_radar_zones").device_id
+    matter_client.send_command.return_value = {"status": 0}
+    await hass.services.async_call(
+        "aqara_fp400", "remove_target", {"device_id": device_id, "target_id": 1}, blocking=True
+    )
+    call = matter_client.send_command.call_args
+    assert call.args[0] == APICommand.DEVICE_COMMAND
+    assert call.kwargs["cluster_id"] == CLUSTER_LOCATION
+    assert call.kwargs["command_name"] == "RemoveDetectionTarget"
+    assert call.kwargs["payload"] == {"targetId": 1}
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_tracked_people").state == "0"
+
     motion = MatterNodeEvent(
         node_id=fp400.node_id,
         endpoint_id=1,
