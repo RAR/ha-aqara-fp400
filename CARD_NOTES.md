@@ -23,7 +23,7 @@ Commit + `git push origin main` when happy.
 - Reads three entities (derived from the required `entity` = the `_zones` sensor): `_zones`, `_regions`, `_tracked_people`.
 - **Layers** via top buttons: "Zones" + one per region (Entry/Exit, Interference, Monitoring). `this._mode`.
 - Grid is an SVG of COLS×ROWS `<rect>` cells (row 0 = nearest the sensor = BOTTOM; `y = ROWS-1-r`).
-  `AHEAD_COL` marks straight-ahead; the sensor triangle sits at the TOP by default (`sensor_at: bottom` flips it), matching the Aqara app. Row 0 is the row nearest the sensor either way.
+  `AHEAD_COL` marks straight-ahead; the sensor triangle sits at the TOP by default (`sensor_at: bottom` flips it), matching the Aqara app. Row 0 is the row nearest the sensor either way. Corner mounts (`mount:` or the side-install select) move the glyph to column 0 / COLS and hide the ahead line; the grid itself is unchanged (left corner verified from issue #8 diagnostics: zone next to the sensor = cell (0,0), monitored area cols 0-6 rows 0-10).
 - Zones = solid filled cells (ZONE_COLORS by id); bottom toolbar shows only EXISTING zones + the one being added,
   an "+ Add zone" button, "erase", and "Delete zone N" when a zone is selected. Save → `set_zones` service.
 - Regions = **single perimeter outline** around their area (`_regionOutline`), except the region being edited,
@@ -39,6 +39,6 @@ Commit + `git push origin main` when happy.
   discover — could be made more obvious.
 - Grid cell borders + region outlines + target dots can get busy; a design pass could calm the visual hierarchy.
 
-Current version: 1.2.0 (design pass 2026-09-21: segmented layer bar, cool-only zone palette, distance labels,
+Current version: 1.2.1 (design pass 2026-09-21: segmented layer bar, cool-only zone palette, distance labels,
 shaded area outside monitoring, selected-zone panel with Enable/Disable + Delete, sync pill, footer Save bar). Commits are on `main` (github.com/RAR/ha-aqara-fp400). Full protocol/verification notes:
 `~/fp400/VERIFY_1196.md`, `~/fp400/NOTES.md`; upstream PR handoff `~/fp400/PR_NOTES.md`.

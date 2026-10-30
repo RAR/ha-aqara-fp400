@@ -121,7 +121,12 @@ type: custom:aqara-fp400-zone-card
 entity: sensor.aqara_spatial_multi_sensor_fp400_radar_zones
 title: Master bedroom      # optional
 sensor_at: top             # optional; top (like the Aqara app) or bottom
+mount: wall                # optional; wall, left_corner or right_corner — defaults to the device's side-install setting
 ```
+
+Corner mounts use the same cell grid; the card draws the sensor in that corner (verified on a left-corner unit, where
+the cell next to the sensor is row 0, column 0; right-corner mirrors it, untested). Set the mounting in the Aqara app
+or with `select.<name>_radar_side_install`.
 
 Pick a layer at the top (Zones, or one of the three regions), select a zone chip or **Add zone**, then click or drag on
 the grid to paint (painting over another zone's cell moves the cell; **Erase** removes cells from any zone). The panel

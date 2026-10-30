@@ -9,6 +9,7 @@
  *   targets_entity: sensor.<device>_tracked_people   (optional; derived from `entity` when omitted)
  *   title: Living room                      (optional)
  *   sensor_at: top | bottom                 (optional; default top, like the Aqara app)
+ *   mount: wall | left_corner | right_corner (optional; default follows select.<device>_side_install)
  */
 
 // Defaults; the Zones sensor reports grid_cols/grid_rows and the card follows those.
@@ -38,6 +39,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
     if (!config.entity) throw new Error("entity (the Zones sensor) is required");
     this._config = config;
     this._top = config.sensor_at !== "bottom"; // sensor drawn at the top, room extends downward (as in the Aqara app)
+    if (config.mount && !["wall", "left_corner", "right_corner"].includes(config.mount)) throw new Error("mount must be wall, left_corner or right_corner");
     this._mode = "zones"; // "zones" or a REGION_KEYS entry
     this._edit = null; // zones edit: Map<id, {cells:Set, enabled, type}>
     this._regionEdit = null; // region edit: {key, cells:Set}
@@ -97,8 +99,8 @@ class AqaraFp400ZoneCard extends HTMLElement {
         .gridline { stroke: var(--primary-text-color); stroke-opacity: 0.12; stroke-width: 0.04; }
         .ahead { stroke: var(--primary-text-color); stroke-opacity: 0.12; stroke-width: 0.04; stroke-dasharray: 0.3 0.3; }
         .label { fill: var(--secondary-text-color); font-size: 0.55px; font-family: inherit; }
-        .sensor { fill: var(--primary-text-color); }
-        .sensor-halo { fill: var(--primary-text-color); fill-opacity: 0.08; }
+        .sensor { fill: var(--primary-text-color); pointer-events: none; }
+        .sensor-halo { fill: var(--primary-text-color); fill-opacity: 0.08; pointer-events: none; }
         .region-outline { fill: none; stroke-width: 0.16; stroke-linecap: square; stroke-linejoin: round; }
         .region-outline.dim { stroke-opacity: 0.55; }
         .target { fill: var(--primary-color); stroke: var(--card-background-color, #fff); stroke-width: 0.1; cursor: pointer; }
@@ -198,7 +200,8 @@ class AqaraFp400ZoneCard extends HTMLElement {
       t.textContent = `${r / 2} m`;
       guides.appendChild(t);
     }
-    guides.appendChild(this._el("line", { x1: AHEAD_COL, y1: 0, x2: AHEAD_COL, y2: ROWS }, "ahead"));
+    this._aheadLine = this._el("line", { x1: AHEAD_COL, y1: 0, x2: AHEAD_COL, y2: ROWS }, "ahead");
+    guides.appendChild(this._aheadLine);
     this._svg.appendChild(guides);
 
     this._cells = [];
@@ -216,15 +219,39 @@ class AqaraFp400ZoneCard extends HTMLElement {
     this._regionLayer = this._el("g");
     this._svg.appendChild(this._regionLayer);
 
-    const sensor = this._el("g");
-    const sy = this._top ? 0 : ROWS; // sensor edge
-    const tip = this._top ? 0.65 : ROWS - 0.65; // triangle points into the room
-    sensor.appendChild(this._el("circle", { cx: AHEAD_COL, cy: sy, r: 1.4 }, "sensor-halo"));
-    sensor.appendChild(this._el("path", { d: `M ${AHEAD_COL - 0.55} ${sy} L ${AHEAD_COL} ${tip} L ${AHEAD_COL + 0.55} ${sy} Z` }, "sensor"));
-    this._svg.appendChild(sensor);
+    this._sensorGlyph = this._el("g");
+    this._svg.appendChild(this._sensorGlyph);
+    this._sensorMode = null;
+    this._placeSensor(this._mount());
 
     this._targetLayer = this._el("g");
     this._svg.appendChild(this._targetLayer);
+  }
+
+  // wall | left_corner | right_corner: the card's config, else the device's side-install setting
+  _mount() {
+    if (this._config.mount) return this._config.mount;
+    const select = this._config.entity.replace(/^sensor\./, "select.").replace(/_zones$/, "_side_install");
+    const state = this._hass?.states?.[select]?.state;
+    return state === "left_corner" || state === "right_corner" ? state : "wall";
+  }
+
+  // Draw the sensor where it is mounted. Corner mounts keep the same cell grid (verified on a
+  // left-corner unit: the cell next to the sensor is row 0, column 0), so only the glyph moves
+  // and the straight-ahead line goes away.
+  _placeSensor(mode) {
+    if (mode === this._sensorMode) return;
+    this._sensorMode = mode;
+    const g = this._sensorGlyph;
+    g.innerHTML = "";
+    const sy = this._top ? 0 : ROWS; // sensor edge
+    const dir = this._top ? 1 : -1; // triangle points into the room
+    const sx = mode === "left_corner" ? 0 : mode === "right_corner" ? COLS : AHEAD_COL;
+    g.appendChild(this._el("circle", { cx: sx, cy: sy, r: 1.4 }, "sensor-halo"));
+    const tri = this._el("path", { d: `M ${sx - 0.55} ${sy} L ${sx} ${sy + dir * 0.65} L ${sx + 0.55} ${sy} Z` }, "sensor");
+    if (mode !== "wall") tri.setAttribute("transform", `rotate(${(mode === "left_corner" ? -45 : 45) * dir} ${sx} ${sy})`);
+    g.appendChild(tri);
+    if (this._aheadLine) this._aheadLine.style.display = mode === "wall" ? "" : "none";
   }
 
   // ---------------------------------------------------------------- state (zones)
@@ -309,6 +336,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
       ROWS = rows;
       this._buildGrid();
     }
+    this._placeSensor(this._mount());
     root.querySelector(".title").textContent = this._config.title || state?.attributes?.friendly_name?.replace(/ Zones$/, "") || "FP400";
     const targetsState = this._hass.states[this._targetsEntity()];
     const targets = targetsState?.attributes?.targets || [];
