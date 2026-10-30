@@ -17,6 +17,7 @@ from .common import setup_integration_with_node_fixture, trigger_subscription_ca
 CLUSTER_CONFIG = 0x115FFC0A
 CLUSTER_LOCATION = 0x115FFC0C
 CLUSTER_RADAR = 0x115FFC0B
+TARGETS_EXPIRE_S = 30  # const.TARGETS_EXPIRE_S
 
 # zone 1 = cells (4,8) and (4,9): bits 4*16+8 = 72, 73 -> byte 9 = 0b11000000
 ZONE_MASK = bytes(9) + bytes([0xC0]) + bytes(30)
@@ -275,6 +276,55 @@ async def test_targets_cleared_when_stale(hass: HomeAssistant, matter_client: Ma
     assert hass.states.get(people).state == "1"
     await hass.services.async_call("switch", "turn_off", {"entity_id": switch}, blocking=True)
     assert hass.states.get(people).state == "0"
+
+
+async def test_late_frame_after_room_empties_expires(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:
+    """A LocationInfo frame that lands after the occupancy clear does not stay forever."""
+    from datetime import timedelta
+
+    from homeassistant.util import dt as dt_util
+    from tests.common import async_fire_time_changed
+
+    people = "sensor.aqara_spatial_multi_sensor_fp400_radar_tracked_people"
+    event = MatterNodeEvent(
+        node_id=fp400.node_id,
+        endpoint_id=1,
+        cluster_id=CLUSTER_LOCATION,
+        event_id=0,
+        event_number=1,
+        priority=1,
+        timestamp=0,
+        timestamp_type=0,
+        data={"targets": [{"targetId": 1, "x": 10, "y": 100, "cell": 0x0207, "activityState": 1}]},
+    )
+
+    # Occupied room: positions are kept however long the stream stays quiet (someone sitting still).
+    await _push_attribute(hass, matter_client, fp400, "1/1030/0", 1)
+    await trigger_subscription_callback(hass, matter_client, EventType.NODE_EVENT, event, node_id=fp400.node_id)
+    await hass.async_block_till_done()
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=TARGETS_EXPIRE_S * 4))
+    await hass.async_block_till_done()
+    assert hass.states.get(people).state == "1"
+
+    # The room empties, then one last frame arrives after the clear.
+    await _push_attribute(hass, matter_client, fp400, "1/1030/0", 0)
+    await hass.async_block_till_done()
+    assert hass.states.get(people).state == "0"
+    await trigger_subscription_callback(hass, matter_client, EventType.NODE_EVENT, event, node_id=fp400.node_id)
+    await hass.async_block_till_done()
+    assert hass.states.get(people).state == "1"
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=TARGETS_EXPIRE_S + 1))
+    await hass.async_block_till_done()
+    assert hass.states.get(people).state == "0"
+
+    # Occupancy coming back before the timeout keeps the frame.
+    await trigger_subscription_callback(hass, matter_client, EventType.NODE_EVENT, event, node_id=fp400.node_id)
+    await _push_attribute(hass, matter_client, fp400, "1/1030/0", 1)
+    await hass.async_block_till_done()
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=TARGETS_EXPIRE_S * 4))
+    await hass.async_block_till_done()
+    assert hass.states.get(people).state == "1"
 
 
 async def test_region_push_updates_sensor(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:
