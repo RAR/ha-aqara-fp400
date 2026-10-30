@@ -374,7 +374,9 @@ class FP400Node:
 
     @property
     def _room_occupied(self) -> bool:
-        return bool(self._attr(SENSOR_ENDPOINT, CLUSTER_OCCUPANCY_SENSING, 0))
+        # Unknown (not reported yet) counts as occupied: never expire positions on a guess.
+        occupied = self._attr(SENSOR_ENDPOINT, CLUSTER_OCCUPANCY_SENSING, 0)
+        return occupied is None or bool(occupied)
 
     @callback
     def _schedule_target_expiry(self) -> None:
