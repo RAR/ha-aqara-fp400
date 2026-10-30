@@ -15,6 +15,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.event import async_call_later
 from homeassistant.util import dt as dt_util
 from matter_server.client.models.node import MatterNode
 from matter_server.common.models import APICommand, EventType, MatterNodeEvent
@@ -45,6 +46,7 @@ from .const import (
     MOTION_EVENTS,
     REGIONS,
     SENSOR_ENDPOINT,
+    TARGETS_EXPIRE_S,
     WATCHED_ATTRIBUTES,
     ZONE_POLL_S,
     cell_from_index,
@@ -199,6 +201,7 @@ class FP400Node:
     _target_listeners: list[Callable[[], None]] = field(default_factory=list)
     _unsubscribe: list[Callable[[], None]] = field(default_factory=list)
     _renew_task: asyncio.Task | None = None
+    _expire_targets_unsub: Callable[[], None] | None = None
     _zone_task: asyncio.Task | None = None
     _renew_now: asyncio.Event = field(default_factory=asyncio.Event)
     _was_available: bool = True
@@ -337,6 +340,7 @@ class FP400Node:
         if self._renew_task:
             self._renew_task.cancel()
             self._renew_task = None
+        self._cancel_target_expiry()
 
     @callback
     def add_listener(self, listener: Callable[[], None], targets: bool = False) -> Callable[[], None]:
@@ -363,9 +367,41 @@ class FP400Node:
     @callback
     def _clear_targets(self) -> None:
         """Drop positions that no longer describe the room (no stream, or nobody there)."""
+        self._cancel_target_expiry()
         if self.targets:
             self.targets = []
             self.targets_updated = dt_util.utcnow()
+
+    @property
+    def _room_occupied(self) -> bool:
+        return bool(self._attr(SENSOR_ENDPOINT, CLUSTER_OCCUPANCY_SENSING, 0))
+
+    @callback
+    def _schedule_target_expiry(self) -> None:
+        """While the room reports empty, expire positions the stream stops refreshing.
+
+        The occupancy clear runs when the room empties, but a LocationInfo frame can still
+        arrive right after it (seen ~0.1 s later); without this, that target stays forever.
+        """
+        self._cancel_target_expiry()
+        if self.targets and not self._room_occupied:
+            self._expire_targets_unsub = async_call_later(self.hass, TARGETS_EXPIRE_S, self._expire_targets)
+
+    @callback
+    def _cancel_target_expiry(self) -> None:
+        if self._expire_targets_unsub:
+            self._expire_targets_unsub()
+            self._expire_targets_unsub = None
+
+    @callback
+    def _expire_targets(self, _now: datetime) -> None:
+        self._expire_targets_unsub = None
+        if not self._room_occupied:
+            LOGGER.debug(
+                "%s: no position update for %ss in an empty room; dropping targets", self.name, TARGETS_EXPIRE_S
+            )
+            self._clear_targets()
+            self._notify()
 
     # ---- incoming data ---------------------------------------------------
 
@@ -576,6 +612,8 @@ class FP400Node:
             self._clear_targets()
             self._notify()
             return
+        if cluster == CLUSTER_OCCUPANCY_SENSING:
+            self._schedule_target_expiry()  # occupied again: the stream's positions are current
         if cluster == CLUSTER_CONFIG and attribute == ATTR_ZONES:
             if not self.zones_pending:  # a local write is being verified; don't show the old list
                 self._refresh_zones()
@@ -599,6 +637,7 @@ class FP400Node:
             raw_targets = _get(payload, "targets", 0, default=[]) if isinstance(payload, dict) else []
             self.targets = [t for t in (parse_target(item) for item in raw_targets or []) if t is not None]
             self.targets_updated = dt_util.utcnow()
+            self._schedule_target_expiry()
             self._notify_targets()
         elif data.cluster_id == CLUSTER_RADAR and data.event_id == EVENT_MOTION_DETECTED:
             code = _get(payload, "motion", 0, default=None) if isinstance(payload, dict) else payload
