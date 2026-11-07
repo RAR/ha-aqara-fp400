@@ -577,6 +577,9 @@ class FP400Node:
         # The client runs subscribers inside its listen loop: an exception here drops the
         # whole server connection, so never let one escape.
         try:
+            # The client only stores pushed values for clusters it knows, so vendor attributes
+            # would stay at the last snapshot forever; keep the raw cache current ourselves.
+            self.node.node_data.attributes[f"{SENSOR_ENDPOINT}/{cluster}/{attribute}"] = value
             self._handle_attribute_updated(cluster, attribute)
         except Exception:
             LOGGER.exception("%s: failed to handle update of %s/%s = %s", self.name, cluster, attribute, value)
@@ -606,7 +609,7 @@ class FP400Node:
             LOGGER.exception("%s: failed to handle node event %s", self.name, data)
 
     def _handle_attribute_updated(self, cluster: int, attribute: int) -> None:
-        # The client has already stored the new value in node_data; read it from there.
+        # _on_attribute_updated has stored the new value in node_data; read it from there.
         if (cluster == CLUSTER_RADAR and attribute == ATTR_HUMAN_COUNT and self.human_count == 0) or (
             cluster == CLUSTER_OCCUPANCY_SENSING and not self._attr(SENSOR_ENDPOINT, cluster, 0)
         ):

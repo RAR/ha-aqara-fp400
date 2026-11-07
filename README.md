@@ -58,7 +58,7 @@ Running the FP400 on Zigbee instead? This integration does not apply; see
 | `sensor.<name>_radar_tracked_people` | people currently tracked; attribute `targets` = `[{id, x, y, row, col, activity, zones}]` (cm) |
 | `sensor.<name>_radar_target_N_x` / `_y` | position of target N (disabled by default; enable for radar map cards) |
 | `sensor.<name>_radar_last_motion` | last motion event: enter / left / left_in / right_out / right_in / left_out / access / away |
-| `sensor.<name>_radar_activity_state` / `_human_count` | activity (unknown/active/still) and the device's people count |
+| `sensor.<name>_radar_activity_state` / `_human_count` | activity (unknown/active/still) and the device's own people count — its estimate from the radar, reported whether or not live tracking is on; *tracked people* above is the number of targets in the position stream, so the two can differ |
 | `sensor.<name>_radar_install_status` / `_install_angle` | orientation from the tilt sensor (diagnostic) |
 | `select.<name>_radar_install_mode` / `_side_install` / `_coordinate_reverse` / `_detection_direction` / `_proximity_distance_level` | install and detection settings |
 | `number.<name>_radar_install_height` | mounting height in mm (limits from the device) |

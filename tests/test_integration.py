@@ -215,12 +215,11 @@ async def test_reloads_with_matter(hass: HomeAssistant, matter_client: MagicMock
 
 
 async def _push_attribute(hass: HomeAssistant, matter_client: MagicMock, node, path: str, value) -> None:
-    """Change a cached attribute and fire ATTRIBUTE_UPDATED the way the client does.
+    """Fire ATTRIBUTE_UPDATED the way the client does: subscribers get only the value.
 
-    The client stores the value first, then calls subscribers with only the value; the
-    path reaches us solely through the subscription's attr_path_filter.
+    The path reaches us solely through the subscription's attr_path_filter, and the client
+    does not store the value in node_data for vendor clusters — the integration must.
     """
-    node.node_data.attributes[path] = value
     await trigger_subscription_callback(
         hass,
         matter_client,
@@ -335,6 +334,16 @@ async def test_region_push_updates_sensor(hass: HomeAssistant, matter_client: Ma
     await hass.async_block_till_done()
     state = hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_regions")
     assert state.attributes["regions"]["entry_exit"] == [[0, 0]]
+
+
+async def test_vendor_attribute_push_updates_sensors(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:
+    """Pushed vendor-cluster values reach the entities (the client does not cache them for us)."""
+    await _push_attribute(hass, matter_client, fp400, f"1/{CLUSTER_RADAR}/2", 3)
+    await _push_attribute(hass, matter_client, fp400, f"1/{CLUSTER_LOCATION}/7", 1)
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_human_count").state == "3"
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_activity_state").state == "active"
+    await _push_attribute(hass, matter_client, fp400, f"1/{CLUSTER_RADAR}/2", 2)
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_human_count").state == "2"
 
 
 async def test_availability_follows_node(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:
