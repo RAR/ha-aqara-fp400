@@ -31,6 +31,8 @@ ATTR_MAX_ZONES = 17
 ATTR_ENTRY_EXIT_REGION = 18
 ATTR_INTERFERENCE_REGION = 19
 ATTR_MONITORING_REGION = 20  # "edge" region; shown as "Monitoring Range" in the app
+ATTR_LEARNING_DURATION = 21  # seconds the AI space background learning runs (device reports 30)
+ATTR_LEARNING_REPORT_TIMEOUT = 22  # seconds after which the device reports the result (device reports 10)
 
 # Region key -> AmbientSensingConfiguration attribute id. Each is a 40 byte cell bitmask on
 # the same grid as zones, set by writing the attribute (unlike zones, which use commands).
@@ -137,6 +139,12 @@ SERVICE_CLEAR_REGION = "clear_region"
 SERVICE_SUBSCRIBE_LOCATION = "subscribe_location"
 SERVICE_START_LEARNING = "start_learning"
 SERVICE_REMOVE_TARGET = "remove_target"
+SERVICE_SET_ZONE_NAME = "set_zone_name"
+
+CONF_ZONE_NAMES = "zone_names"  # entry data: {serial: {zone id: name}}
+LEARNING_DEFAULT_S = 30
+LEARNING_MARGIN_S = 5  # read the zones back this long after the device should be done
+ZONE_NAME_MAX = 32
 
 
 def cells_to_mask(cells: Iterable[tuple[int, int]]) -> bytes:

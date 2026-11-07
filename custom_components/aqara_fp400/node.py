@@ -6,7 +6,7 @@ import asyncio
 import base64
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import partial
 from typing import Any
 
@@ -24,6 +24,8 @@ from .const import (
     ACTIVITY_STATES,
     ATTR_ACTIVITY_STATE,
     ATTR_HUMAN_COUNT,
+    ATTR_LEARNING_DURATION,
+    ATTR_LEARNING_REPORT_TIMEOUT,
     ATTR_MAX_ZONES,
     ATTR_ZONE_ID,
     ATTR_ZONES,
@@ -39,6 +41,8 @@ from .const import (
     GRID_COLS,
     GRID_ROWS,
     INVERTED_REGIONS,
+    LEARNING_DEFAULT_S,
+    LEARNING_MARGIN_S,
     LOCATION_RENEW_S,
     LOCATION_SUBSCRIPTION_S,
     LOGGER,
@@ -191,6 +195,12 @@ class FP400Node:
     last_motion: str | None = None
     last_motion_zone: int | None = None
     last_motion_at: datetime | None = None
+    zone_motion: dict[int, tuple[str, datetime]] = field(default_factory=dict)  # zone id -> (event, when)
+    zone_names: dict[int, str] = field(default_factory=dict)
+    save_zone_names: Callable[[dict[int, str]], None] | None = None
+    learning_until: datetime | None = None
+    learning_finished_at: datetime | None = None
+    learning_zones: int | None = None  # zones on the device after the last learning run
     live_tracking: bool = False
     zones_pending: bool = False
     zones_error: str | None = None
@@ -202,6 +212,7 @@ class FP400Node:
     _unsubscribe: list[Callable[[], None]] = field(default_factory=list)
     _renew_task: asyncio.Task | None = None
     _expire_targets_unsub: Callable[[], None] | None = None
+    _learning_unsub: Callable[[], None] | None = None
     _zone_task: asyncio.Task | None = None
     _renew_now: asyncio.Event = field(default_factory=asyncio.Event)
     _was_available: bool = True
@@ -246,6 +257,21 @@ class FP400Node:
     def max_zones(self) -> int:
         """Zone limit reported by the device."""
         return int(self._attr(SENSOR_ENDPOINT, CLUSTER_CONFIG, ATTR_MAX_ZONES) or MAX_ZONES)
+
+    def zone_name(self, zone_id: int) -> str | None:
+        """User-given name of a zone (names live in Home Assistant; the device has no name field)."""
+        return self.zone_names.get(zone_id) or None
+
+    @callback
+    def set_zone_name(self, zone_id: int, name: str) -> None:
+        """Name a zone; an empty name clears it."""
+        if name:
+            self.zone_names[zone_id] = name
+        else:
+            self.zone_names.pop(zone_id, None)
+        if self.save_zone_names is not None:
+            self.save_zone_names(dict(self.zone_names))
+        self._notify()
 
     @property
     def activity_state(self) -> str:
@@ -341,6 +367,9 @@ class FP400Node:
             self._renew_task.cancel()
             self._renew_task = None
         self._cancel_target_expiry()
+        if self._learning_unsub is not None:
+            self._learning_unsub()
+            self._learning_unsub = None
 
     @callback
     def add_listener(self, listener: Callable[[], None], targets: bool = False) -> Callable[[], None]:
@@ -653,6 +682,8 @@ class FP400Node:
             zone_ids = {ep: zid for zid, ep in self.zone_endpoints().items()}
             self.last_motion_zone = zone_ids.get(data.endpoint_id)
             self.last_motion_at = dt_util.utcnow()
+            if self.last_motion_zone is not None:
+                self.zone_motion[self.last_motion_zone] = (self.last_motion, self.last_motion_at)
             self._notify()
 
     # ---- commands --------------------------------------------------------
@@ -700,8 +731,27 @@ class FP400Node:
         await self._async_apply_zones([z for z in self.zones if z.zone_id != zone_id])
 
     async def async_start_learning(self) -> None:
-        """Kick off the AI space background learning."""
-        await self._command(CLUSTER_CONFIG, "EnableAiSpaceBackgroundLearning")
+        """Kick off the AI space background learning and read the zones back when it should be done."""
+        self._check_status(await self._command(CLUSTER_CONFIG, "EnableAiSpaceBackgroundLearning"))
+        duration = int(self.config_attr(ATTR_LEARNING_DURATION) or LEARNING_DEFAULT_S)
+        report = int(self.config_attr(ATTR_LEARNING_REPORT_TIMEOUT) or 0)
+        self.learning_until = dt_util.utcnow() + timedelta(seconds=duration + report)
+        self.learning_finished_at, self.learning_zones = None, None
+        if self._learning_unsub is not None:
+            self._learning_unsub()
+        self._learning_unsub = async_call_later(self.hass, duration + report + LEARNING_MARGIN_S, self._learning_done)
+        self._notify()
+
+    async def _learning_done(self, _now: datetime) -> None:
+        self._learning_unsub = None
+        zones = await self.async_read_zones()
+        if zones is not None and not self.zones_pending:
+            self.zones = zones
+        self.learning_until = None
+        self.learning_finished_at = dt_util.utcnow()
+        self.learning_zones = len(self.zones)
+        LOGGER.info("%s: background learning finished; %s zones on the device", self.name, self.learning_zones)
+        self._notify()
 
     async def async_remove_target(self, target_id: int) -> None:
         """Make the device drop one tracked target (a ghost); a real person is picked up again."""

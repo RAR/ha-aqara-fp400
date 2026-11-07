@@ -67,6 +67,19 @@
       },
       "regions": {
         "name": "Regions"
+      },
+      "zone_motion": {
+        "name": "Zone {id} last motion",
+        "state": {
+          "enter": "Enter",
+          "left": "Left",
+          "left_in": "Left in",
+          "right_out": "Right out",
+          "right_in": "Right in",
+          "left_out": "Left out",
+          "access": "Access",
+          "away": "Away"
+        }
       }
     },
     "switch": {
@@ -222,6 +235,24 @@
         "target_id": {
           "name": "Target",
           "description": "The target's id, as shown by the tracked people sensor."
+        }
+      }
+    },
+    "set_zone_name": {
+      "name": "Name a zone",
+      "description": "Gives a detection zone a name. Names are kept by Home Assistant (the sensor has none) and show up in the zones sensor, the per-zone last motion sensors and the zone card. An empty name removes it.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "The FP400."
+        },
+        "zone_id": {
+          "name": "Zone",
+          "description": "Zone id (1-8)."
+        },
+        "name": {
+          "name": "Name",
+          "description": "The name; leave empty to clear it."
         }
       }
     }

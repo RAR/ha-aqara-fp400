@@ -1,6 +1,8 @@
 /*
  * Aqara FP400 zone card — paints detection zones and the entry/exit, interference and
  * monitoring regions on the sensor's 20 x 16 grid, and shows tracked people live.
+ * Zones can be named (stored by the integration) and the Learn button runs the device's
+ * background learning with a countdown.
  *
  * Config:
  *   type: custom:aqara-fp400-zone-card
@@ -126,6 +128,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
         .panel .meta { color: var(--secondary-text-color); }
         .panel .spacer { flex: 1; min-width: 8px; }
         .panel .btns { display: flex; gap: 8px; flex: none; }
+        .panel .name-input { flex: 1 1 140px; min-width: 0; min-height: 36px; font: inherit; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); }
 
         button { font: inherit; background: var(--primary-color); color: var(--text-primary-color, #fff); border: 0; border-radius: 8px; padding: 8px 16px; min-height: 40px; cursor: pointer; font-size: 0.92em; }
         button.secondary { background: var(--secondary-background-color); color: var(--primary-text-color); }
@@ -260,7 +263,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
     const state = this._hass?.states[this._config.entity];
     const zones = new Map();
     for (const zone of state?.attributes?.zones || []) {
-      zones.set(zone.id, { cells: new Set(zone.cells.map(([r, c]) => r * COLS + c)), enabled: zone.enabled !== false, type: zone.type || 0 });
+      zones.set(zone.id, { cells: new Set(zone.cells.map(([r, c]) => r * COLS + c)), enabled: zone.enabled !== false, type: zone.type || 0, name: zone.name || "" });
     }
     return zones;
   }
@@ -321,6 +324,22 @@ class AqaraFp400ZoneCard extends HTMLElement {
 
   _zoneColor(id) {
     return ZONE_COLORS[(id - 1) % ZONE_COLORS.length];
+  }
+
+  // "Bed" if the zone is named, else "Zone 3"
+  _zoneLabel(id, zones) {
+    const name = (zones || this._entityZones()).get(id)?.name;
+    return name ? name : `Zone ${id}`;
+  }
+
+  // background learning: the Zones sensor says until when the device is busy and what came out
+  _learning(state) {
+    const attrs = state?.attributes || {};
+    const until = attrs.learning_until ? Date.parse(attrs.learning_until) : 0;
+    const left = until ? Math.max(0, Math.ceil((until - Date.now()) / 1000)) : 0;
+    const finished = attrs.learning_finished_at ? Date.parse(attrs.learning_finished_at) : 0;
+    const fresh = finished && Date.now() - finished < 60000;
+    return { active: !!until && until > Date.now() - 15000, left, fresh, zones: attrs.learning_zones };
   }
 
   // ---------------------------------------------------------------- render
@@ -394,7 +413,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
       if (!still) this._targetLayer.appendChild(this._el("circle", { cx, cy, r: 0.7 }, "target-halo"));
       const dot = this._el("circle", { cx, cy, r: 0.36 }, "target" + (still ? " still" : ""));
       const title = this._el("title");
-      title.textContent = `Person ${t.id}: ${(t.y / 100).toFixed(1)} m ahead, ${Math.abs(t.x / 100).toFixed(1)} m ${t.x < 0 ? "right" : "left"}, ${t.activity}${t.zones?.length ? ", in zone " + t.zones.join(", ") : ""}`;
+      title.textContent = `Person ${t.id}: ${(t.y / 100).toFixed(1)} m ahead, ${Math.abs(t.x / 100).toFixed(1)} m ${t.x < 0 ? "right" : "left"}, ${t.activity}${t.zones?.length ? ", in " + t.zones.map((z) => this._zoneLabel(z, zones)).join(", ") : ""}`;
       dot.appendChild(title);
       // a click on a dot offers to forget it (ghosts); stop it reaching the painting handler
       dot.addEventListener("pointerdown", (ev) => { ev.stopPropagation(); this._forget = t.id; this._controlsKey = null; this._render(); });
@@ -406,9 +425,10 @@ class AqaraFp400ZoneCard extends HTMLElement {
     // swallows the click.
     const key = JSON.stringify([
       this._mode, this._active, !!this._saving, !!this._edit, this._regionEdit?.key, !!this._confirmedEmpty, this._forget,
-      [...zones].map(([id, z]) => [id, z.cells.size, z.enabled]),
+      [...zones].map(([id, z]) => [id, z.cells.size, z.enabled, z.name]),
       REGION_KEYS.map((k) => regions[k].size),
       state?.attributes?.max_zones,
+      this._learning(state).active,
     ]);
     if (key !== this._controlsKey) {
       this._controlsKey = key;
@@ -449,8 +469,14 @@ class AqaraFp400ZoneCard extends HTMLElement {
       text = "Unsaved changes";
       cls = "dirty";
     } else if (this._mode === "zones") {
-      if (state?.attributes?.pending) [text, cls] = ["Verifying…", "busy"];
+      const learning = this._learning(state);
+      if (learning.active) [text, cls] = [learning.left ? `Learning… ${learning.left} s` : "Learning… reading zones", "busy"];
+      else if (state?.attributes?.pending) [text, cls] = ["Verifying…", "busy"];
       else if (state?.attributes?.error) [text, cls] = ["Error: " + state.attributes.error, "bad"];
+      else if (learning.fresh) text = `Learning done · ${learning.zones === 1 ? "1 zone" : `${learning.zones} zones`}`;
+      // tick the countdown (and clear the "done" note) without waiting for a state change
+      clearTimeout(this._learnTick);
+      if (learning.active || learning.fresh) this._learnTick = setTimeout(() => { this._controlsKey = null; this._render(); }, 1000);
     } else {
       const rstate = this._hass.states[this._regionsEntity()]?.attributes;
       if (rstate?.pending?.[this._mode]) [text, cls] = ["Verifying…", "busy"];
@@ -530,7 +556,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
       const chip = document.createElement("span");
       chip.className = "chip" + (this._active === id ? " active" : "") + (exists ? "" : " new");
       const disabled = exists && zones.get(id).enabled === false;
-      chip.innerHTML = `<span class="dot" style="background:${this._zoneColor(id)}"></span><span>Zone ${id}</span>` + (exists ? `<span class="n">${disabled ? "off" : zones.get(id).cells.size}</span>` : "");
+      chip.innerHTML = `<span class="dot" style="background:${this._zoneColor(id)}"></span><span>${exists ? this._esc(this._zoneLabel(id, zones)) : `Zone ${id}`}</span>` + (exists ? `<span class="n">${disabled ? "off" : zones.get(id).cells.size}</span>` : "");
       chip.title = exists ? `Select zone ${id} to paint it` : "New zone — paint cells on the grid";
       chip.addEventListener("click", () => { this._active = id; this._render(); });
       tools.appendChild(chip);
@@ -553,14 +579,28 @@ class AqaraFp400ZoneCard extends HTMLElement {
       add.addEventListener("click", () => { this._active = nextId; this._render(); });
       tools.appendChild(add);
     }
+    const learning = this._learning(state);
+    const learn = document.createElement("button");
+    learn.className = "ghost";
+    learn.textContent = learning.active ? "Learning…" : "Learn";
+    learn.title = "AI space background learning: the sensor watches the room for about half a minute and proposes zones itself";
+    learn.disabled = this._saving || learning.active || !!this._edit;
+    learn.addEventListener("click", async () => { await this._runService("start_learning", {}); this._controlsKey = null; this._render(); });
+    tools.appendChild(learn);
 
     // detail panel for the selected zone
     if (zones.has(this._active)) {
       const zone = zones.get(this._active);
-      panel.innerHTML = `<span class="name"><span class="dot" style="background:${this._zoneColor(this._active)}"></span>Zone ${this._active}</span>
-        <span class="meta">${zone.cells.size} cells · ${zone.enabled ? "enabled" : "disabled"}</span><span class="spacer"></span>`;
+      panel.innerHTML = `<span class="name"><span class="dot" style="background:${this._zoneColor(this._active)}"></span>${this._esc(this._zoneLabel(this._active, zones))}</span>
+        <span class="meta">${zone.name ? `zone ${this._active} · ` : ""}${zone.cells.size} cells · ${zone.enabled ? "enabled" : "disabled"}</span><span class="spacer"></span>`;
       const group = document.createElement("span");
       group.className = "btns";
+      const rename = document.createElement("button");
+      rename.className = "secondary small";
+      rename.textContent = zone.name ? "Rename" : "Name";
+      rename.disabled = this._saving;
+      rename.addEventListener("click", () => this._renameZone(panel, this._active, zone.name));
+      group.appendChild(rename);
       const toggle = document.createElement("button");
       toggle.className = "secondary small";
       toggle.textContent = zone.enabled ? "Disable" : "Enable";
@@ -586,6 +626,42 @@ class AqaraFp400ZoneCard extends HTMLElement {
       : "No zones yet. Each zone becomes its own occupancy sensor in Home Assistant.";
     const removingAll = this._confirmedEmpty && this._zones().size === 0;
     this._actionButtons(hint, !!this._edit, () => { this._edit = null; this._confirmedEmpty = false; this._render(); }, () => this._save(), removingAll ? `This removes all ${this._entityZones().size} zones from the device. Press Save again to confirm.` : null);
+  }
+
+  _esc(text) {
+    return String(text).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+  }
+
+  // swap the zone panel for a name box; the name is stored by the integration, not on the device
+  _renameZone(panel, id, current) {
+    panel.innerHTML = `<span class="name"><span class="dot" style="background:${this._zoneColor(id)}"></span>Zone ${id}</span>`;
+    const input = document.createElement("input");
+    input.className = "name-input";
+    input.maxLength = 32;
+    input.placeholder = "Name (empty to clear)";
+    input.value = current || "";
+    panel.appendChild(input);
+    const group = document.createElement("span");
+    group.className = "btns";
+    const cancel = document.createElement("button");
+    cancel.className = "secondary small";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", () => { this._controlsKey = null; this._render(); });
+    group.appendChild(cancel);
+    const save = document.createElement("button");
+    save.className = "small";
+    save.textContent = "Save name";
+    const submit = async () => {
+      await this._runService("set_zone_name", { zone_id: id, name: input.value.trim() });
+      this._controlsKey = null;
+      this._render();
+    };
+    save.addEventListener("click", submit);
+    input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") submit(); if (ev.key === "Escape") cancel.click(); });
+    group.appendChild(save);
+    panel.appendChild(group);
+    input.focus();
+    input.select();
   }
 
   _freeZoneId(zones, max) {

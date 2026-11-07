@@ -25,6 +25,7 @@ from matter_server.common.models import EventType
 import voluptuous as vol
 
 from .const import (
+    CONF_ZONE_NAMES,
     DOMAIN,
     GRID_COLS,
     GRID_ROWS,
@@ -35,10 +36,12 @@ from .const import (
     SERVICE_CLEAR_ZONES,
     SERVICE_REMOVE_TARGET,
     SERVICE_SET_REGION,
+    SERVICE_SET_ZONE_NAME,
     SERVICE_SET_ZONES,
     SERVICE_START_LEARNING,
     SERVICE_SUBSCRIBE_LOCATION,
     VENDOR_ID,
+    ZONE_NAME_MAX,
 )
 from .node import FP400Node, Zone
 
@@ -90,6 +93,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FP400ConfigEntry) -> boo
         if node.node_id in data.nodes or not is_fp400(node):
             return
         fp = FP400Node(hass=hass, node=node, matter_client=client)
+        _attach_zone_names(hass, entry, fp)
         await fp.async_start()
         data.nodes[node.node_id] = fp
         LOGGER.info("Found %s (node %s)", fp.name, node.node_id)
@@ -122,6 +126,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: FP400ConfigEntry) -> boo
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _async_register_services(hass, entry)
     return True
+
+
+def _serial(node: MatterNode) -> str:
+    """Key for per-device settings that survives re-commissioning (the node id does not)."""
+    return str(node.node_data.attributes.get("0/40/15") or node.node_id)
+
+
+@callback
+def _attach_zone_names(hass: HomeAssistant, entry: FP400ConfigEntry, fp: FP400Node) -> None:
+    """Load the zone names stored for this sensor and let the node save changes."""
+    key = _serial(fp.node)
+    stored = entry.data.get(CONF_ZONE_NAMES, {}).get(key, {})
+    fp.zone_names = {int(zone_id): name for zone_id, name in stored.items() if name}
+
+    @callback
+    def save(names: dict[int, str]) -> None:
+        all_names = {k: dict(v) for k, v in entry.data.get(CONF_ZONE_NAMES, {}).items()}
+        all_names[key] = {str(zone_id): name for zone_id, name in names.items()}
+        hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_ZONE_NAMES: all_names})
+
+    fp.save_zone_names = save
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: FP400ConfigEntry) -> bool:
@@ -238,6 +263,13 @@ REMOVE_TARGET_SCHEMA = vol.Schema(
         vol.Required("target_id"): vol.All(vol.Coerce(int), vol.Range(min=0, max=255)),
     }
 )
+SET_ZONE_NAME_SCHEMA = vol.Schema(
+    {
+        vol.Required("device_id"): cv.string,
+        vol.Required("zone_id"): vol.All(vol.Coerce(int), vol.Range(min=1, max=8)),
+        vol.Optional("name", default=""): vol.All(cv.string, vol.Length(max=ZONE_NAME_MAX)),
+    }
+)
 SUBSCRIBE_SCHEMA = vol.Schema(
     {
         vol.Required("device_id"): cv.string,
@@ -302,6 +334,10 @@ def _async_register_services(hass: HomeAssistant, entry: FP400ConfigEntry) -> No
         fp = _node_for_device(hass, call.data["device_id"])
         await fp.async_remove_target(call.data["target_id"])
 
+    async def set_zone_name(call: ServiceCall) -> None:
+        fp = _node_for_device(hass, call.data["device_id"])
+        fp.set_zone_name(call.data["zone_id"], call.data["name"].strip())
+
     hass.services.async_register(
         DOMAIN, SERVICE_SET_ZONES, set_zones, schema=SET_ZONES_SCHEMA, supports_response=SupportsResponse.OPTIONAL
     )
@@ -311,3 +347,4 @@ def _async_register_services(hass: HomeAssistant, entry: FP400ConfigEntry) -> No
     hass.services.async_register(DOMAIN, SERVICE_SUBSCRIBE_LOCATION, subscribe_location, schema=SUBSCRIBE_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_START_LEARNING, start_learning, schema=DEVICE_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_REMOVE_TARGET, remove_target, schema=REMOVE_TARGET_SCHEMA)
+    hass.services.async_register(DOMAIN, SERVICE_SET_ZONE_NAME, set_zone_name, schema=SET_ZONE_NAME_SCHEMA)

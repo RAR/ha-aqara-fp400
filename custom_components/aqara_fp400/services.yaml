@@ -107,3 +107,24 @@ remove_target:
           min: 0
           max: 255
           mode: box
+set_zone_name:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          filter:
+            - integration: aqara_fp400
+            - integration: matter
+    zone_id:
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 8
+          mode: box
+    name:
+      required: false
+      example: Bed
+      selector:
+        text:

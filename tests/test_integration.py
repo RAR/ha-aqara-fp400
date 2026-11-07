@@ -50,7 +50,7 @@ async def test_entities(hass: HomeAssistant, fp400) -> None:
     zones = hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_zones")
     assert zones is not None, [s.entity_id for s in hass.states.async_all() if "fp400" in s.entity_id]
     assert zones.state == "1"
-    assert zones.attributes["zones"] == [{"id": 1, "type": 0, "enabled": True, "cells": [[4, 8], [4, 9]]}]
+    assert zones.attributes["zones"] == [{"id": 1, "type": 0, "enabled": True, "cells": [[4, 8], [4, 9]], "name": None}]
     assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_tracked_people").state == "0"
     assert hass.states.get("switch.aqara_spatial_multi_sensor_fp400_radar_live_tracking").state == "off"
     assert hass.states.get("button.aqara_spatial_multi_sensor_fp400_radar_clear_zones") is not None
@@ -400,6 +400,122 @@ async def test_location_failure_warns_once(
     assert matter_client.send_command.call_count >= 2
     warnings = [r for r in caplog.records if "location subscription failed" in r.message and r.levelname == "WARNING"]
     assert len(warnings) == 1
+
+
+def _radar_device(hass: HomeAssistant) -> str:
+    return er.async_get(hass).async_get("sensor.aqara_spatial_multi_sensor_fp400_radar_zones").device_id
+
+
+def _motion_event(node_id: int, endpoint: int, code: int, number: int = 7) -> MatterNodeEvent:
+    return MatterNodeEvent(
+        node_id=node_id,
+        endpoint_id=endpoint,
+        cluster_id=CLUSTER_RADAR,
+        event_id=0,
+        event_number=number,
+        priority=1,
+        timestamp=0,
+        timestamp_type=0,
+        data={"TLVValue": {"0": code}},
+    )
+
+
+async def test_zone_names(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:
+    """Names are stored by the integration (keyed by serial) and shown on zones and motion sensors."""
+    device_id = _radar_device(hass)
+    await hass.services.async_call(
+        "aqara_fp400", "set_zone_name", {"device_id": device_id, "zone_id": 1, "name": " Bed "}, blocking=True
+    )
+    await hass.async_block_till_done()
+    zones = hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_zones")
+    assert zones.attributes["zones"][0]["name"] == "Bed"
+    entry = hass.config_entries.async_entries("aqara_fp400")[0]
+    serial = str(fp400.node_data.attributes["0/40/15"])
+    assert entry.data["zone_names"] == {serial: {"1": "Bed"}}
+
+    fp400.node_data.attributes["3/291503115/1"] = 1  # zone 1's child endpoint
+    await trigger_subscription_callback(
+        hass, matter_client, EventType.NODE_EVENT, _motion_event(fp400.node_id, 3, 0), node_id=fp400.node_id
+    )
+    motion = hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_last_motion")
+    assert motion.state == "enter"
+    assert motion.attributes["zone"] == 1 and motion.attributes["zone_name"] == "Bed"
+
+    await hass.services.async_call(
+        "aqara_fp400", "set_zone_name", {"device_id": device_id, "zone_id": 1}, blocking=True
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_zones").attributes["zones"][0]["name"] is None
+    assert hass.config_entries.async_entries("aqara_fp400")[0].data["zone_names"] == {serial: {}}
+
+
+async def test_zone_motion_sensors_follow_zones(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:
+    """One last-motion sensor per zone: it reports that zone's events and goes away with the zone."""
+    zone1 = "sensor.aqara_spatial_multi_sensor_fp400_radar_zone_1_last_motion"
+    zone2 = "sensor.aqara_spatial_multi_sensor_fp400_radar_zone_2_last_motion"
+    assert hass.states.get(zone1).state == "unknown"
+    assert hass.states.get(zone2) is None
+
+    fp400.node_data.attributes["3/291503115/1"] = 1
+    await trigger_subscription_callback(
+        hass, matter_client, EventType.NODE_EVENT, _motion_event(fp400.node_id, 3, 1), node_id=fp400.node_id
+    )
+    assert hass.states.get(zone1).state == "left"
+    assert hass.states.get(zone1).attributes["zone"] == 1
+    # the room's own event does not touch the zone sensor
+    await trigger_subscription_callback(
+        hass, matter_client, EventType.NODE_EVENT, _motion_event(fp400.node_id, 1, 6, 8), node_id=fp400.node_id
+    )
+    assert hass.states.get(zone1).state == "left"
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_last_motion").state == "access"
+
+    await hass.services.async_call(
+        "aqara_fp400",
+        "set_zones",
+        {"device_id": _radar_device(hass), "zones": [{"id": 2, "cells": "3-4,6-10"}]},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(zone1) is None
+    assert er.async_get(hass).async_get(zone1) is None
+    assert hass.states.get(zone2).state == "unknown"
+
+
+async def test_learning_countdown(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:
+    """Start learning exposes when the device will be done and reads the zones back afterwards."""
+    from datetime import timedelta
+
+    from homeassistant.util import dt as dt_util
+    from tests.common import async_fire_time_changed
+
+    zones = "sensor.aqara_spatial_multi_sensor_fp400_radar_zones"
+    await hass.services.async_call(
+        "button",
+        "press",
+        {"entity_id": "button.aqara_spatial_multi_sensor_fp400_radar_start_background_learning"},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+    call = matter_client.send_command.call_args
+    assert call.kwargs["cluster_id"] == CLUSTER_CONFIG
+    assert call.kwargs["command_name"] == "EnableAiSpaceBackgroundLearning"
+    state = hass.states.get(zones)
+    assert state.attributes["learning_until"] is not None
+    assert state.attributes["learning_zones"] is None
+
+    matter_client.read_attribute.return_value = {
+        f"1/{CLUSTER_CONFIG}/16": [
+            {"zoneId": 1, "zoneType": 0, "cells": base64.b64encode(ZONE_MASK).decode(), "enabled": True},
+            {"zoneId": 3, "zoneType": 0, "cells": base64.b64encode(ZONE_MASK).decode(), "enabled": True},
+        ]
+    }
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=60))
+    await hass.async_block_till_done()
+    state = hass.states.get(zones)
+    assert state.attributes["learning_until"] is None
+    assert state.attributes["learning_zones"] == 2
+    assert state.state == "2"
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_zone_3_last_motion") is not None
 
 
 async def test_node_removed(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:

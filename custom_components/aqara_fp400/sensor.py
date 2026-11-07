@@ -7,6 +7,7 @@ from typing import Any
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.const import DEGREE, EntityCategory, UnitOfLength
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -15,6 +16,7 @@ from .const import (
     ACTIVITY_STATES,
     ATTR_INSTALL_ANGLE,
     ATTR_INSTALL_STATUS,
+    DOMAIN,
     GRID_COLS,
     GRID_ROWS,
     INSTALL_STATUSES,
@@ -46,10 +48,39 @@ async def async_setup_entry(
             entities.append(TargetAxisSensor(fp, index, "x"))
             entities.append(TargetAxisSensor(fp, index, "y"))
         async_add_entities(entities)
+        _follow_zones(hass, entry, fp, async_add_entities)
 
     for fp in entry.runtime_data.nodes.values():
         _add(fp)
     entry.async_on_unload(async_dispatcher_connect(hass, SIGNAL_NEW_NODE, _add))
+
+
+@callback
+def _follow_zones(
+    hass: HomeAssistant, entry: FP400ConfigEntry, fp: FP400Node, async_add_entities: AddEntitiesCallback
+) -> None:
+    """Keep one last-motion sensor per configured zone: added and removed with the zones."""
+    present: dict[int, ZoneMotionSensor] = {}
+
+    @callback
+    def sync() -> None:
+        wanted = {zone.zone_id for zone in fp.zones}
+        if new := sorted(wanted - present.keys()):
+            entities = [ZoneMotionSensor(fp, zone_id) for zone_id in new]
+            present.update({e.zone_id: e for e in entities})
+            async_add_entities(entities)
+        for zone_id in sorted(present.keys() - wanted):
+            entity = present.pop(zone_id)
+            hass.async_create_task(_remove(entity))
+
+    async def _remove(entity: ZoneMotionSensor) -> None:
+        await entity.async_remove(force_remove=True)
+        registry = er.async_get(hass)
+        if entity_id := registry.async_get_entity_id("sensor", DOMAIN, entity.unique_id):
+            registry.async_remove(entity_id)
+
+    entry.async_on_unload(fp.add_listener(sync))
+    sync()
 
 
 class ZonesSensor(FP400Entity, SensorEntity):
@@ -69,10 +100,13 @@ class ZonesSensor(FP400Entity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
-            "zones": [zone.as_dict() for zone in self.fp.zones],
+            "zones": [{**zone.as_dict(), "name": self.fp.zone_name(zone.zone_id)} for zone in self.fp.zones],
             "pending": self.fp.zones_pending,
             "error": self.fp.zones_error,
             "max_zones": self.fp.max_zones,
+            "learning_until": self.fp.learning_until,
+            "learning_finished_at": self.fp.learning_finished_at,
+            "learning_zones": self.fp.learning_zones,
             "zone_endpoints": self.fp.zone_endpoints(),
             "grid_rows": GRID_ROWS,
             "grid_cols": GRID_COLS,
@@ -169,7 +203,40 @@ class LastMotionSensor(FP400Entity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        return {"zone": self.fp.last_motion_zone, "at": self.fp.last_motion_at}
+        zone = self.fp.last_motion_zone
+        return {
+            "zone": zone,
+            "zone_name": None if zone is None else self.fp.zone_name(zone),
+            "at": self.fp.last_motion_at,
+        }
+
+
+class ZoneMotionSensor(FP400Entity, SensorEntity):
+    """Last MotionDetected event of one zone (its child endpoint reports enter/left/... too)."""
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = list(MOTION_EVENTS.values())
+    _attr_icon = "mdi:motion-sensor"
+
+    def __init__(self, fp: FP400Node, zone_id: int) -> None:
+        super().__init__(fp, f"zone_{zone_id}_last_motion")
+        self._attr_translation_key = "zone_motion"
+        self._attr_translation_placeholders = {"id": str(zone_id)}
+        self.zone_id = zone_id
+
+    @property
+    def native_value(self) -> str | None:
+        motion = self.fp.zone_motion.get(self.zone_id)
+        return None if motion is None else motion[0]
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        motion = self.fp.zone_motion.get(self.zone_id)
+        return {
+            "zone": self.zone_id,
+            "zone_name": self.fp.zone_name(self.zone_id),
+            "at": None if motion is None else motion[1],
+        }
 
 
 class ActivityStateSensor(FP400Entity, SensorEntity):

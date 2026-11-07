@@ -53,11 +53,12 @@ Running the FP400 on Zigbee instead? This integration does not apply; see
 
 | Entity | Meaning |
 |---|---|
-| `sensor.<name>_radar_zones` | number of zones; attribute `zones` holds `[{id, type, enabled, cells: [[row, col], …]}]` |
+| `sensor.<name>_radar_zones` | number of zones; attribute `zones` holds `[{id, name, type, enabled, cells: [[row, col], …]}]`; `learning_until` / `learning_zones` while and after background learning |
 | `sensor.<name>_radar_regions` | number of non-empty regions; attribute `regions` holds `{entry_exit, interference, monitoring: [[row, col], …]}` |
 | `sensor.<name>_radar_tracked_people` | people currently tracked; attribute `targets` = `[{id, x, y, row, col, activity, zones}]` (cm) |
 | `sensor.<name>_radar_target_N_x` / `_y` | position of target N (disabled by default; enable for radar map cards) |
-| `sensor.<name>_radar_last_motion` | last motion event: enter / left / left_in / right_out / right_in / left_out / access / away |
+| `sensor.<name>_radar_last_motion` | last motion event: enter / left / left_in / right_out / right_in / left_out / access / away; attributes `zone`, `zone_name`, `at` |
+| `sensor.<name>_radar_zone_N_last_motion` | the same per zone — one sensor per configured zone, created and removed with the zones |
 | `sensor.<name>_radar_activity_state` / `_human_count` | activity (unknown/active/still) and the device's own people count — its estimate from the radar, reported whether or not live tracking is on; *tracked people* above is the number of targets in the position stream, so the two can differ |
 | `sensor.<name>_radar_install_status` / `_install_angle` | orientation from the tilt sensor (diagnostic) |
 | `select.<name>_radar_install_mode` / `_side_install` / `_coordinate_reverse` / `_detection_direction` / `_proximity_distance_level` | install and detection settings |
@@ -102,6 +103,10 @@ data:
   cells: "6-7,4-6"          # rows,cols range, or explicit [[row, col], …]
 ```
 
+`aqara_fp400.set_zone_name` (`device_id`, `zone_id`, `name`) names a zone. The sensor has no name field, so names are
+kept by Home Assistant (per sensor serial, so they survive re-pairing) and show up in the `zones` attribute, the per-zone
+motion sensors and the card; an empty name clears it.
+
 `aqara_fp400.clear_region` takes `device_id` and `region`. Clearing the `monitoring` region means the full grid (the
 device would detect nobody if the range were empty). The zone card can paint zones and all three regions —
 switch layers with the buttons above the grid.
@@ -131,7 +136,8 @@ or with `select.<name>_radar_side_install`.
 
 Pick a layer at the top (Zones, or one of the three regions), select a zone chip or **Add zone**, then click or drag on
 the grid to paint (painting over another zone's cell moves the cell; **Erase** removes cells from any zone). The panel
-under the chips enables/disables or deletes the selected zone. Regions are drawn as outlines and painted as a fill while
+under the chips names, enables/disables or deletes the selected zone. **Learn** runs the sensor's AI background learning
+(it proposes zones itself after watching the room for about half a minute); the card counts down and reloads the zones. Regions are drawn as outlines and painted as a fill while
 you edit them. **Save** writes the change to the device. Tracked people are drawn as dots (hollow when still); cells
 outside the monitoring range are shaded. Turn on the live tracking switch to see people move.
 
