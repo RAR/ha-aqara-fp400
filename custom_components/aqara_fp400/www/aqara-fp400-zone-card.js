@@ -11,7 +11,7 @@
  *   targets_entity: sensor.<device>_tracked_people   (optional; derived from `entity` when omitted)
  *   title: Living room                      (optional)
  *   sensor_at: top | bottom                 (optional; default top, like the Aqara app)
- *   mount: wall | left_corner | right_corner (optional; default follows select.<device>_side_install)
+ *   mount: wall | left_corner | right_corner (optional; default follows select.<device>_side_install_position)
  */
 
 // Defaults; the Zones sensor reports grid_cols/grid_rows and the card follows those.
@@ -234,8 +234,11 @@ class AqaraFp400ZoneCard extends HTMLElement {
   // wall | left_corner | right_corner: the card's config, else the device's side-install setting
   _mount() {
     if (this._config.mount) return this._config.mount;
-    const select = this._config.entity.replace(/^sensor\./, "select.").replace(/_zones$/, "_side_install");
-    const state = this._hass?.states?.[select]?.state;
+    // The select's entity ID follows its translated name ("Side install position"); the shorter
+    // "_side_install" is kept for setups that renamed it.
+    const base = this._config.entity.replace(/^sensor\./, "select.").replace(/_zones$/, "");
+    const states = this._hass?.states || {};
+    const state = (states[base + "_side_install_position"] || states[base + "_side_install"])?.state;
     return state === "left_corner" || state === "right_corner" ? state : "wall";
   }
 
