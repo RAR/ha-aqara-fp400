@@ -468,19 +468,24 @@ class AqaraFp400ZoneCard extends HTMLElement {
     } else if (dirty) {
       text = "Unsaved changes";
       cls = "dirty";
-    } else if (this._mode === "zones") {
-      const learning = this._learning(state);
-      if (learning.active) [text, cls] = [learning.left ? `Learning… ${learning.left} s` : "Learning… reading zones", "busy"];
-      else if (state?.attributes?.pending) [text, cls] = ["Verifying…", "busy"];
-      else if (state?.attributes?.error) [text, cls] = ["Error: " + state.attributes.error, "bad"];
-      else if (learning.fresh) text = `Learning done · ${learning.zones === 1 ? "1 zone" : `${learning.zones} zones`}`;
-      // tick the countdown (and clear the "done" note) without waiting for a state change
-      clearTimeout(this._learnTick);
-      if (learning.active || learning.fresh) this._learnTick = setTimeout(() => { this._controlsKey = null; this._render(); }, 1000);
     } else {
       const rstate = this._hass.states[this._regionsEntity()]?.attributes;
-      if (rstate?.pending?.[this._mode]) [text, cls] = ["Verifying…", "busy"];
+      // a region error is shown on every layer: a rejected monitoring range matters even while editing zones
+      const badRegion = REGION_KEYS.find((k) => rstate?.error?.[k]);
+      const regionError = badRegion && `Error: ${REGION_META[badRegion].label}: ${rstate.error[badRegion]}`;
+      if (this._mode === "zones") {
+        const learning = this._learning(state);
+        if (learning.active) [text, cls] = [learning.left ? `Learning… ${learning.left} s` : "Learning… reading zones", "busy"];
+        else if (state?.attributes?.pending) [text, cls] = ["Verifying…", "busy"];
+        else if (state?.attributes?.error) [text, cls] = ["Error: " + state.attributes.error, "bad"];
+        else if (regionError) [text, cls] = [regionError, "bad"];
+        else if (learning.fresh) text = `Learning done · ${learning.zones === 1 ? "1 zone" : `${learning.zones} zones`}`;
+        // tick the countdown (and clear the "done" note) without waiting for a state change
+        clearTimeout(this._learnTick);
+        if (learning.active || learning.fresh) this._learnTick = setTimeout(() => { this._controlsKey = null; this._render(); }, 1000);
+      } else if (rstate?.pending?.[this._mode]) [text, cls] = ["Verifying…", "busy"];
       else if (rstate?.error?.[this._mode]) [text, cls] = ["Error: " + rstate.error[this._mode], "bad"];
+      else if (regionError) [text, cls] = [regionError, "bad"];
     }
     el.textContent = text;
     el.className = "sync " + cls;

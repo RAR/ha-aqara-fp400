@@ -21,7 +21,7 @@ from .const import (
     GRID_ROWS,
     INSTALL_STATUSES,
     MAX_TARGETS,
-    MOTION_EVENTS,
+    MOTION_OPTIONS,
 )
 from .entity import FP400Entity
 from .node import FP400Node
@@ -191,7 +191,7 @@ class LastMotionSensor(FP400Entity, SensorEntity):
     """Last MotionDetected event (enter/left/access/away/...)."""
 
     _attr_device_class = SensorDeviceClass.ENUM
-    _attr_options = list(MOTION_EVENTS.values())
+    _attr_options = MOTION_OPTIONS
     _attr_icon = "mdi:motion-sensor"
 
     def __init__(self, fp: FP400Node) -> None:
@@ -215,7 +215,7 @@ class ZoneMotionSensor(FP400Entity, SensorEntity):
     """Last MotionDetected event of one zone (its child endpoint reports enter/left/... too)."""
 
     _attr_device_class = SensorDeviceClass.ENUM
-    _attr_options = list(MOTION_EVENTS.values())
+    _attr_options = MOTION_OPTIONS
     _attr_icon = "mdi:motion-sensor"
 
     def __init__(self, fp: FP400Node, zone_id: int) -> None:

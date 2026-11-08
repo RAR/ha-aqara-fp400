@@ -34,7 +34,8 @@
           "right_in": "Right in",
           "left_out": "Left out",
           "access": "Access",
-          "away": "Away"
+          "away": "Away",
+          "unrecognized": "Unrecognized"
         }
       },
       "activity_state": {
@@ -78,7 +79,8 @@
           "right_in": "Right in",
           "left_out": "Left out",
           "access": "Access",
-          "away": "Away"
+          "away": "Away",
+          "unrecognized": "Unrecognized"
         }
       }
     },

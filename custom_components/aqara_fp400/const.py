@@ -129,6 +129,10 @@ MOTION_EVENTS = {
     6: "access",
     7: "away",
 }
+# State for a MotionDetected code this integration does not know (e.g. added by a firmware
+# update). Not "unknown": that would read like Home Assistant's own unknown state.
+MOTION_UNRECOGNIZED = "unrecognized"
+MOTION_OPTIONS = [*MOTION_EVENTS.values(), MOTION_UNRECOGNIZED]
 
 CONF_NODE_ID = "node_id"
 

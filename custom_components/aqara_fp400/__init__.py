@@ -209,16 +209,34 @@ async def _async_register_card(hass: HomeAssistant) -> None:
 # services
 
 
+def _cell_range(spec: str, size: int, axis: str) -> range:
+    """Parse "a-b" or "a" into an inclusive range inside the grid.
+
+    A reversed or out-of-grid range is rejected rather than silently giving no cells:
+    for the monitoring region, no cells would mean "monitor the whole grid".
+    """
+    start_text, dash, end_text = spec.strip().partition("-")
+    try:
+        start = int(start_text)
+        end = int(end_text) if dash else start
+    except ValueError as err:
+        raise vol.Invalid(f"{axis} range {spec.strip()!r} is not 'a-b' or 'a'") from err
+    if start > end:
+        raise vol.Invalid(f"{axis} range {spec.strip()!r} is reversed")
+    if start < 0 or end >= size:
+        raise vol.Invalid(f"{axis} range {spec.strip()!r} is outside 0-{size - 1}")
+    return range(start, end + 1)
+
+
 def _cell_list(value: Any) -> list[list[int]]:
     """Accept [[row, col], ...] or a "rows,cols" range spec such as "3-4,6-10"."""
     if isinstance(value, str):
-        rows_spec, _, cols_spec = value.partition(",")
-
-        def rng(spec: str) -> range:
-            start, _, end = spec.strip().partition("-")
-            return range(int(start), int(end or start) + 1)
-
-        return [[r, c] for r in rng(rows_spec) for c in rng(cols_spec)]
+        rows_spec, separator, cols_spec = value.partition(",")
+        if not separator:
+            raise vol.Invalid(f"cell spec {value!r} is not 'rows,cols' such as '3-4,6-10'")
+        rows = _cell_range(rows_spec, GRID_ROWS, "row")
+        cols = _cell_range(cols_spec, GRID_COLS, "column")
+        return [[r, c] for r in rows for c in cols]
     cells = []
     for item in value:
         row, col = int(item[0]), int(item[1])

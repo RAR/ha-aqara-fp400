@@ -11,6 +11,7 @@ from homeassistant.helpers import entity_registry as er
 from matter_server.common.models import APICommand, EventType, MatterNodeEvent
 import pytest
 from tests.common import MockConfigEntry
+import voluptuous as vol
 
 from .common import setup_integration_with_node_fixture, trigger_subscription_callback
 
@@ -336,6 +337,69 @@ async def test_region_push_updates_sensor(hass: HomeAssistant, matter_client: Ma
     assert state.attributes["regions"]["entry_exit"] == [[0, 0]]
 
 
+async def test_region_reverts_when_device_keeps_its_own(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:
+    """A region the device does not accept is shown as the device has it, with an error, not as drawn."""
+    from datetime import timedelta
+
+    from homeassistant.exceptions import HomeAssistantError
+    from homeassistant.util import dt as dt_util
+    from tests.common import async_fire_time_changed
+
+    regions = "sensor.aqara_spatial_multi_sensor_fp400_radar_regions"
+    full = base64.b64encode(bytes(40)).decode()  # monitoring stores exclusions: none excluded = whole grid
+    path = f"1/{CLUSTER_CONFIG}/20"
+    await _push_attribute(hass, matter_client, fp400, path, full)
+    assert len(hass.states.get(regions).attributes["regions"]["monitoring"]) == 320
+
+    # The device answers every read-back with the full grid: the drawing must not stick.
+    matter_client.read_attribute.return_value = {path: full}
+    await hass.services.async_call(
+        "aqara_fp400",
+        "set_region",
+        {"device_id": _radar_device(hass), "region": "monitoring", "cells": "0-3,0-3"},
+        blocking=True,
+    )
+    state = hass.states.get(regions)
+    assert state.attributes["pending"]["monitoring"] is True
+    assert len(state.attributes["regions"]["monitoring"]) == 16
+    for _ in range(6):
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=5))
+        await hass.async_block_till_done()
+    state = hass.states.get(regions)
+    assert state.attributes["pending"]["monitoring"] is False
+    assert state.attributes["error"]["monitoring"] == "device kept a different region"
+    assert len(state.attributes["regions"]["monitoring"]) == 320
+
+    # No answer at all: fall back to what the device had before the write.
+    matter_client.read_attribute.side_effect = TimeoutError
+    await hass.services.async_call(
+        "aqara_fp400",
+        "set_region",
+        {"device_id": _radar_device(hass), "region": "monitoring", "cells": "0-3,0-3"},
+        blocking=True,
+    )
+    for _ in range(6):
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=5))
+        await hass.async_block_till_done()
+    state = hass.states.get(regions)
+    assert state.attributes["error"]["monitoring"] == "could not read the region back from the device"
+    assert len(state.attributes["regions"]["monitoring"]) == 320
+
+    # A rejected write reverts straight away.
+    matter_client.read_attribute.side_effect = None
+    matter_client.send_command.return_value = [{"Path": path, "Status": 134}]
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(
+            "aqara_fp400",
+            "set_region",
+            {"device_id": _radar_device(hass), "region": "monitoring", "cells": "0-3,0-3"},
+            blocking=True,
+        )
+    state = hass.states.get(regions)
+    assert "status 134" in state.attributes["error"]["monitoring"]
+    assert len(state.attributes["regions"]["monitoring"]) == 320
+
+
 async def test_vendor_attribute_push_updates_sensors(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:
     """Pushed vendor-cluster values reach the entities (the client does not cache them for us)."""
     await _push_attribute(hass, matter_client, fp400, f"1/{CLUSTER_RADAR}/2", 3)
@@ -479,6 +543,45 @@ async def test_zone_motion_sensors_follow_zones(hass: HomeAssistant, matter_clie
     assert hass.states.get(zone1) is None
     assert er.async_get(hass).async_get(zone1) is None
     assert hass.states.get(zone2).state == "unknown"
+
+
+async def test_unrecognized_motion_code(
+    hass: HomeAssistant, matter_client: MagicMock, fp400, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A code missing from MOTION_EVENTS is a valid enum state, logged once per code."""
+    last = "sensor.aqara_spatial_multi_sensor_fp400_radar_last_motion"
+    zone1 = "sensor.aqara_spatial_multi_sensor_fp400_radar_zone_1_last_motion"
+    fp400.node_data.attributes["3/291503115/1"] = 1
+    for number in (20, 21):
+        event = _motion_event(fp400.node_id, 3, 42, number)
+        await trigger_subscription_callback(hass, matter_client, EventType.NODE_EVENT, event, node_id=fp400.node_id)
+        await hass.async_block_till_done()
+    assert hass.states.get(last).state == "unrecognized"
+    assert hass.states.get(zone1).state == "unrecognized"
+    warnings = [r for r in caplog.records if "unrecognized MotionDetected code 42" in r.message]
+    assert len(warnings) == 1
+    # Known codes keep working afterwards.
+    await trigger_subscription_callback(
+        hass, matter_client, EventType.NODE_EVENT, _motion_event(fp400.node_id, 3, 0, 22), node_id=fp400.node_id
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(last).state == "enter"
+
+
+@pytest.mark.parametrize("cells", ["10-5,0-15", "0-20,0-15", "0-19,0-16", "3-4", "a,1", "3-4,", "1-,2"])
+async def test_cell_spec_rejects_reversed_or_out_of_grid_ranges(
+    hass: HomeAssistant, matter_client: MagicMock, fp400, cells: str
+) -> None:
+    """A bad range is a validation error, never an empty list (which means the full grid for monitoring)."""
+    matter_client.send_command.reset_mock()
+    with pytest.raises(vol.Invalid):
+        await hass.services.async_call(
+            "aqara_fp400",
+            "set_region",
+            {"device_id": _radar_device(hass), "region": "monitoring", "cells": cells},
+            blocking=True,
+        )
+    matter_client.send_command.assert_not_called()
 
 
 async def test_learning_countdown(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:

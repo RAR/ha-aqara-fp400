@@ -57,7 +57,7 @@ Running the FP400 on Zigbee instead? This integration does not apply; see
 | `sensor.<name>_radar_regions` | number of non-empty regions; attribute `regions` holds `{entry_exit, interference, monitoring: [[row, col], …]}` |
 | `sensor.<name>_radar_tracked_people` | people currently tracked; attribute `targets` = `[{id, x, y, row, col, activity, zones}]` (cm) |
 | `sensor.<name>_radar_target_N_x` / `_y` | position of target N (disabled by default; enable for radar map cards) |
-| `sensor.<name>_radar_last_motion` | last motion event: enter / left / left_in / right_out / right_in / left_out / access / away; attributes `zone`, `zone_name`, `at` |
+| `sensor.<name>_radar_last_motion` | last motion event: enter / left / left_in / right_out / right_in / left_out / access / away (or `unrecognized` for a code this integration does not know yet; the code is logged); attributes `zone`, `zone_name`, `at` |
 | `sensor.<name>_radar_zone_N_last_motion` | the same per zone — one sensor per configured zone, created and removed with the zones |
 | `sensor.<name>_radar_activity_state` / `_human_count` | activity (unknown/active/still) and the device's own people count — its estimate from the radar, reported whether or not live tracking is on; *tracked people* above is the number of targets in the position stream, so the two can differ |
 | `sensor.<name>_radar_install_status` / `_install_angle` | orientation from the tilt sensor (diagnostic) |
@@ -102,6 +102,10 @@ data:
   region: entry_exit        # or: interference, monitoring
   cells: "6-7,4-6"          # rows,cols range, or explicit [[row, col], …]
 ```
+
+Range specs are validated (rows 0–19, columns 0–15, no reversed ranges). Every zone and region write is read back
+from the device; if the device keeps something else, the entities and the card show what the device has, with the
+error in the `error` attribute and in the card's status chip on every layer.
 
 `aqara_fp400.set_zone_name` (`device_id`, `zone_id`, `name`) names a zone. The sensor has no name field, so names are
 kept by Home Assistant (per sensor serial, so they survive re-pairing) and show up in the `zones` attribute, the per-zone

@@ -48,6 +48,7 @@ from .const import (
     LOGGER,
     MAX_ZONES,
     MOTION_EVENTS,
+    MOTION_UNRECOGNIZED,
     REGIONS,
     SENSOR_ENDPOINT,
     TARGETS_EXPIRE_S,
@@ -217,6 +218,7 @@ class FP400Node:
     _renew_now: asyncio.Event = field(default_factory=asyncio.Event)
     _was_available: bool = True
     _renew_failing: bool = False
+    _unrecognized_motion_codes: set[int] = field(default_factory=set)
 
     @property
     def node_id(self) -> int:
@@ -540,9 +542,13 @@ class FP400Node:
     @callback
     def _refresh_regions(self) -> None:
         """Decode the cached region bitmasks into cell lists."""
-        for key, attribute in REGIONS.items():
-            raw = self._attr(SENSOR_ENDPOINT, CLUSTER_CONFIG, attribute)
-            self.regions[key] = self._region_cells(key, to_bytes(raw)) if raw else []
+        for key in REGIONS:
+            self._refresh_region(key)
+
+    @callback
+    def _refresh_region(self, key: str) -> None:
+        raw = self._attr(SENSOR_ENDPOINT, CLUSTER_CONFIG, REGIONS[key])
+        self.regions[key] = self._region_cells(key, to_bytes(raw)) if raw else []
 
     async def async_read_regions(self) -> None:
         """Read the region bitmasks from the device (subscription misses their changes)."""
@@ -567,6 +573,8 @@ class FP400Node:
             # (the device would then see nobody at all).
             cells = [[r, c] for r in range(GRID_ROWS) for c in range(GRID_COLS)]
         mask = self._region_mask(key, cells)
+        path = f"{SENSOR_ENDPOINT}/{CLUSTER_CONFIG}/{REGIONS[key]}"
+        previous = self.node.node_data.attributes.get(path)
         self.regions[key] = self._region_cells(key, mask)
         self.regions_pending[key] = True
         self.regions_error[key] = None
@@ -574,31 +582,45 @@ class FP400Node:
         try:
             await self.async_write_config(REGIONS[key], base64.b64encode(mask).decode())
         except Exception as err:
+            # Show what the device really has, not the rejected drawing.
+            self._refresh_region(key)
             self.regions_pending[key] = False
             self.regions_error[key] = str(err)
             self._notify()
             raise
         self.hass.async_create_background_task(
-            self._async_verify_region(key, mask), f"{self.name} verify region {key}"
+            self._async_verify_region(key, mask, previous), f"{self.name} verify region {key}"
         )
 
-    async def _async_verify_region(self, key: str, expected: bytes) -> None:
+    async def _async_verify_region(self, key: str, expected: bytes, previous: Any) -> None:
         want = self._region_cells(key, expected)
+        path = f"{SENSOR_ENDPOINT}/{CLUSTER_CONFIG}/{REGIONS[key]}"
+        got = None
         for delay in (0.5, 1, 1.5, 2, 3):
             await asyncio.sleep(delay)
-            path = f"{SENSOR_ENDPOINT}/{CLUSTER_CONFIG}/{REGIONS[key]}"
             try:
                 result = await self.matter_client.read_attribute(self.node_id, path)
             except Exception:
                 continue
             got = result.get(path) if isinstance(result, dict) else None
             if got is not None and self._region_cells(key, to_bytes(got)) == want:
+                self.node.node_data.attributes[path] = got
                 self.regions[key], self.regions_pending[key], self.regions_error[key] = want, False, None
                 self._notify()
                 return
         self.regions_pending[key] = False
-        self.regions_error[key] = "device kept a different region"
-        LOGGER.warning("%s: region %s did not read back as written", self.name, key)
+        if got is None:
+            # Nothing read back: fall back to the last value we knew the device had
+            # (the successful write mirrored the new one into the cache).
+            self.node.node_data.attributes[path] = previous
+            self.regions_error[key] = "could not read the region back from the device"
+            self._refresh_region(key)
+        else:
+            # The device kept something else; show that rather than the drawing.
+            self.node.node_data.attributes[path] = got
+            self._refresh_region(key)
+            self.regions_error[key] = "device kept a different region"
+        LOGGER.warning("%s: region %s did not read back as written: %s", self.name, key, self.regions_error[key])
         self._notify()
 
     @callback
@@ -678,7 +700,15 @@ class FP400Node:
             if not isinstance(code, int | str) or (isinstance(code, str) and not code.isdigit()):
                 LOGGER.debug("%s: unexpected MotionDetected payload %r", self.name, data.data)
                 return
-            self.last_motion = MOTION_EVENTS.get(int(code), str(code))
+            motion_code = int(code)
+            if motion_code in MOTION_EVENTS:
+                self.last_motion = MOTION_EVENTS[motion_code]
+            else:
+                # The motion sensors are enums: a value outside their options cannot be written.
+                if motion_code not in self._unrecognized_motion_codes:
+                    self._unrecognized_motion_codes.add(motion_code)
+                    LOGGER.warning("%s: unrecognized MotionDetected code %s", self.name, motion_code)
+                self.last_motion = MOTION_UNRECOGNIZED
             zone_ids = {ep: zid for zid, ep in self.zone_endpoints().items()}
             self.last_motion_zone = zone_ids.get(data.endpoint_id)
             self.last_motion_at = dt_util.utcnow()
