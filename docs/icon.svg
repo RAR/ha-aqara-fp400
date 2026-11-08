@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1e293b"/><stop offset="1" stop-color="#0f172a"/></linearGradient><clipPath id="tile"><rect x="8" y="8" width="240" height="240" rx="52"/></clipPath>
+<linearGradient id="fan" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#0ea5e9" stop-opacity="0.25"/></linearGradient></defs>
+<rect x="8" y="8" width="240" height="240" rx="52" fill="url(#bg)"/>
+<g clip-path="url(#tile)">
+  <path d="M128 38 L-6 244 A240 240 0 0 1 262 244 Z" fill="url(#fan)"/>
+  <g fill="none" stroke="#0f172a" stroke-width="6" stroke-opacity="0.55">
+    <path d="M83 108 A72 72 0 0 1 173 108"/>
+    <path d="M48 154 A128 128 0 0 1 208 154"/>
+    <path d="M12 201 A184 184 0 0 1 244 201"/>
+  </g>
+  <circle cx="172" cy="156" r="18" fill="#34d399" stroke="#0f172a" stroke-width="5"/>
+</g>
+<circle cx="128" cy="38" r="18" fill="#f8fafc"/><circle cx="128" cy="38" r="6" fill="#0f172a"/></svg>
