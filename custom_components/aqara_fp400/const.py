@@ -119,6 +119,9 @@ TARGETS_EXPIRE_S = 30
 ZONE_POLL_S = 120  # re-read zones; the device does not push attr 16 changes (e.g. zones set in the Aqara app)
 
 ACTIVITY_STATES = {0: "unknown", 1: "active", 2: "still"}
+# Field 6 of a LocationInfo target (Aqara support, 2026-11: "target type", not a posture).
+# Non-zero only while "AI Enhanced Person Detection" (attr 41) is on.
+TARGET_TYPES = {0: "person", 1: "not_person", 2: "fan", 3: "pet"}
 MOTION_EVENTS = {
     0: "enter",
     1: "left",

@@ -24,6 +24,7 @@ const GUTTER = 1.6; // left gutter (grid units) for the distance labels
 // Cool hues only, so a zone is never mistaken for the green/red/amber region outlines.
 const ZONE_COLORS = ["#4f8ef7", "#a35bf7", "#19b5c9", "#e0409a", "#6e6cf0", "#7fb3ff", "#c084fc", "#ff8ad8"];
 const REGION_KEYS = ["entry_exit", "interference", "monitoring"];
+const TARGET_LABELS = { person: "Person", not_person: "Not a person", fan: "Fan", pet: "Pet", unknown: "Unknown target" };
 const REGION_META = {
   entry_exit: { label: "Entry/Exit", color: "#3bbf6a", dash: "", help: "Where people walk in and out. Paint the doorway cells." },
   interference: { label: "Interference", color: "#f75f4f", dash: "", help: "Things that fool the radar (fans, curtains). Paint them to ignore them." },
@@ -108,6 +109,8 @@ class AqaraFp400ZoneCard extends HTMLElement {
         .target { fill: var(--primary-color); stroke: var(--card-background-color, #fff); stroke-width: 0.1; cursor: pointer; }
         .target.still { fill: var(--card-background-color, #fff); stroke: var(--primary-color); stroke-width: 0.12; }
         .target-halo { fill: var(--primary-color); fill-opacity: 0.18; }
+        .target.other { fill: var(--secondary-text-color); stroke: var(--card-background-color, #fff); stroke-dasharray: 0.12 0.08; }
+        .target.other.still { fill: var(--card-background-color, #fff); stroke: var(--secondary-text-color); }
 
         .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
         .chip { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 6px 14px 6px 10px; border-radius: 20px; cursor: pointer; font-size: 0.92em; border: 2px solid transparent; background: var(--secondary-background-color); color: var(--primary-text-color); transition: border-color 0.15s, background 0.15s; }
@@ -365,8 +368,10 @@ class AqaraFp400ZoneCard extends HTMLElement {
     const live = !!targetsState?.attributes?.live_tracking;
     root.querySelector(".live-dot").classList.toggle("on", live);
     const activity = targetsState?.attributes?.activity_state;
+    const people = targets.filter((t) => !t.type || t.type === "person").length;
+    const others = targets.length - people;
     root.querySelector(".sub-text").textContent = state
-      ? `${targets.length === 1 ? "1 person" : `${targets.length} people`}${activity && activity !== "unknown" ? ` · ${activity}` : ""}${live ? " · live" : " · live tracking off"}`
+      ? `${people === 1 ? "1 person" : `${people} people`}${others ? ` + ${others} other` : ""}${activity && activity !== "unknown" ? ` · ${activity}` : ""}${live ? " · live" : " · live tracking off"}`
       : "entity not found";
     this._renderSync(state);
 
@@ -413,10 +418,11 @@ class AqaraFp400ZoneCard extends HTMLElement {
       const cx = Math.min(COLS - 0.3, Math.max(0.3, AHEAD_COL - t.x / CELL_CM));
       const cy = Math.min(ROWS - 0.3, Math.max(0.3, this._distY(t.y)));
       const still = t.activity === "still";
-      if (!still) this._targetLayer.appendChild(this._el("circle", { cx, cy, r: 0.7 }, "target-halo"));
-      const dot = this._el("circle", { cx, cy, r: 0.36 }, "target" + (still ? " still" : ""));
+      const person = !t.type || t.type === "person";
+      if (!still && person) this._targetLayer.appendChild(this._el("circle", { cx, cy, r: 0.7 }, "target-halo"));
+      const dot = this._el("circle", { cx, cy, r: 0.36 }, "target" + (still ? " still" : "") + (person ? "" : " other"));
       const title = this._el("title");
-      title.textContent = `Person ${t.id}: ${(t.y / 100).toFixed(1)} m ahead, ${Math.abs(t.x / 100).toFixed(1)} m ${t.x < 0 ? "right" : "left"}, ${t.activity}${t.zones?.length ? ", in " + t.zones.map((z) => this._zoneLabel(z, zones)).join(", ") : ""}`;
+      title.textContent = `${TARGET_LABELS[t.type] || "Person"} ${t.id}: ${(t.y / 100).toFixed(1)} m ahead, ${Math.abs(t.x / 100).toFixed(1)} m ${t.x < 0 ? "right" : "left"}, ${t.activity}${t.zones?.length ? ", in " + t.zones.map((z) => this._zoneLabel(z, zones)).join(", ") : ""}`;
       dot.appendChild(title);
       // a click on a dot offers to forget it (ghosts); stop it reaching the painting handler
       dot.addEventListener("pointerdown", (ev) => { ev.stopPropagation(); this._forget = t.id; this._controlsKey = null; this._render(); });

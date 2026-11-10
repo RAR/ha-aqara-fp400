@@ -82,16 +82,40 @@ async def test_location_event(hass: HomeAssistant, matter_client: MagicMock, fp4
     state = hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_tracked_people")
     assert state.state == "1"
     assert state.attributes["targets"] == [
-        {"id": 0, "x": -5, "y": 228, "row": 4, "col": 8, "activity": "still", "zones": [1]}
+        {"id": 0, "x": -5, "y": 228, "row": 4, "col": 8, "activity": "still", "type": "person", "snr": 0, "zones": [1]}
     ]
 
-    # matter.js style payload with labels
-    event.data = {"targets": [{"targetId": 1, "x": 10, "y": 100, "cell": 0x0207, "activityState": 1}]}
+    # matter.js style payload with labels; a fan (field 6 = 2, the old "postureState") is listed but not counted
+    event.data = {
+        "targets": [
+            {
+                "targetId": 1,
+                "x": 10,
+                "y": 100,
+                "cell": 0x0207,
+                "activityState": 1,
+                "fallState": 1010,
+                "postureState": 0,
+            },
+            {
+                "targetId": 2,
+                "x": 60,
+                "y": 300,
+                "cell": 0x0607,
+                "activityState": 1,
+                "fallState": 4010,
+                "postureState": 2,
+            },
+        ]
+    }
     await trigger_subscription_callback(hass, matter_client, EventType.NODE_EVENT, event, node_id=fp400.node_id)
     await hass.async_block_till_done()
     state = hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_tracked_people")
+    assert state.state == "1"
     assert state.attributes["targets"][0]["col"] == 7
     assert state.attributes["targets"][0]["activity"] == "active"
+    assert state.attributes["targets"][0]["snr"] == 1010
+    assert state.attributes["targets"][1]["type"] == "fan"
 
     # forgetting a target sends the command and drops it locally
     device_id = er.async_get(hass).async_get("sensor.aqara_spatial_multi_sensor_fp400_radar_zones").device_id

@@ -51,6 +51,7 @@ from .const import (
     MOTION_UNRECOGNIZED,
     REGIONS,
     SENSOR_ENDPOINT,
+    TARGET_TYPES,
     TARGETS_EXPIRE_S,
     WATCHED_ATTRIBUTES,
     ZONE_POLL_S,
@@ -100,6 +101,13 @@ class Target:
     col: int
     activity: str
     zone_id: int | None
+    kind: str = "person"
+    snr: int | None = None
+
+    @property
+    def is_person(self) -> bool:
+        """False for targets the device classified as not a person (fan, pet, other)."""
+        return self.kind == "person"
 
     @property
     def zones(self) -> list[int]:
@@ -115,6 +123,8 @@ class Target:
             "row": self.row,
             "col": self.col,
             "activity": self.activity,
+            "type": self.kind,
+            "snr": self.snr,
             "zones": self.zones,
         }
 
@@ -137,9 +147,7 @@ def _event_payload(data: Any) -> Any:
 
 
 def _zone_signature(zones: list[Zone]) -> list[tuple[int, int, bool, tuple[tuple[int, int], ...]]]:
-    return sorted(
-        (z.zone_id, z.zone_type, z.enabled, tuple(tuple(c) for c in sorted(z.cells))) for z in zones
-    )
+    return sorted((z.zone_id, z.zone_type, z.enabled, tuple(tuple(c) for c in sorted(z.cells))) for z in zones)
 
 
 def parse_zone(raw: Any) -> Zone | None:
@@ -172,7 +180,14 @@ def parse_target(raw: Any) -> Target | None:
         col=col,
         activity=ACTIVITY_STATES.get(int(_get(raw, "activityState", 4, default=0) or 0), "unknown"),
         zone_id=_zone_id(_get(raw, "inZoneID", "inZoneId", "zoneMask", 8, default=None)),
+        # fields 5/6 were first named fallState/postureState; Aqara says they are SNR and target type
+        kind=TARGET_TYPES.get(int(_get(raw, "targetType", "postureState", 6, default=0) or 0), "unknown"),
+        snr=_int_or_none(_get(raw, "signalToNoiseRatio", "fallState", 5, default=None)),
     )
+
+
+def _int_or_none(value: Any) -> int | None:
+    return int(value) if isinstance(value, int | float) else None
 
 
 def _zone_id(value: Any) -> int | None:

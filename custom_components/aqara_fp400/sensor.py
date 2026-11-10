@@ -151,7 +151,8 @@ class TargetsSensor(FP400Entity, SensorEntity):
 
     @property
     def native_value(self) -> int:
-        return len(self.fp.targets)
+        # targets the device has classified as a fan, pet or other non-person are listed but not counted
+        return sum(1 for target in self.fp.targets if target.is_person)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
