@@ -55,7 +55,7 @@ Running the FP400 on Zigbee instead? This integration does not apply; see
 |---|---|
 | `sensor.<name>_radar_zones` | number of zones; attribute `zones` holds `[{id, name, type, enabled, cells: [[row, col], …]}]`; `learning_until` / `learning_zones` while and after background learning |
 | `sensor.<name>_radar_regions` | number of non-empty regions; attribute `regions` holds `{entry_exit, interference, monitoring: [[row, col], …]}` |
-| `sensor.<name>_radar_tracked_people` | people currently tracked; attribute `targets` = `[{id, x, y, row, col, activity, type, snr, zones}]` (cm); `type` is person / not_person / fan / pet when *AI Enhanced Person Detection* is on in the Aqara app (always person otherwise), and only persons are counted; `snr` is the radar signal-to-noise figure |
+| `sensor.<name>_radar_tracked_people` | people currently tracked; attribute `targets` = `[{id, x, y, z, row, col, activity, type, posture, velocity, snr, zones}]` (cm); `type` is person / child / not_person / fan / pet / curtain / green_plants / sweeper / air_purifier when *AI Enhanced Person Detection* is on in the Aqara app (always person otherwise), and only persons and children are counted; `activity` is still while the velocity is 0; `posture` (walk / sit / stand / lie / fall) is null unless the device reports one |
 | `sensor.<name>_radar_target_N_x` / `_y` | position of target N (disabled by default; enable for radar map cards) |
 | `sensor.<name>_radar_last_motion` | last motion event: enter / left / left_in / right_out / right_in / left_out / access / away (or `unrecognized` for a code this integration does not know yet; the code is logged); attributes `zone`, `zone_name`, `at` |
 | `sensor.<name>_radar_zone_N_last_motion` | the same per zone — one sensor per configured zone, created and removed with the zones |
@@ -119,8 +119,8 @@ switch layers with the buttons above the grid.
 
 16 columns × 20 rows of roughly 50 cm cells. Row 0 is the row nearest the sensor, column 8 is straight ahead;
 columns grow as `x` decreases (column ≈ 8 − round((x + 25) / 50), row ≈ y / 50). `x`/`y` in the target attributes are
-centimetres (`y` = distance from the sensor). The layout was verified by letting the device assign a person to
-single-column test zones.
+centimetres (`y` = distance from the sensor); `row`/`col` are derived from them. The layout was verified by letting the
+device assign a person to single-column test zones.
 
 ## Zone card
 

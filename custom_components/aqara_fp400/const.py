@@ -119,9 +119,22 @@ TARGETS_EXPIRE_S = 30
 ZONE_POLL_S = 120  # re-read zones; the device does not push attr 16 changes (e.g. zones set in the Aqara app)
 
 ACTIVITY_STATES = {0: "unknown", 1: "active", 2: "still"}
-# Field 6 of a LocationInfo target (Aqara support, 2026-11: "target type", not a posture).
-# Non-zero only while "AI Enhanced Person Detection" (attr 41) is on.
-TARGET_TYPES = {0: "person", 1: "not_person", 2: "fan", 3: "pet"}
+# Target struct of the Location event, per Aqara's manufacturer extension (matterjs-server PR #1269):
+# 0 id, 1 x, 2 y, 3 z (cm), 4 velocity, 5 signal-to-noise ratio, 6 target type, 7 posture, 8 zone id.
+# Types other than person are reported only while "AI Enhanced Person Detection" (attr 41) is on.
+TARGET_TYPES = {
+    0: "person",
+    1: "not_person",
+    2: "fan",
+    3: "pet",
+    4: "curtain",
+    5: "green_plants",
+    6: "sweeper",
+    7: "air_purifier",
+    8: "child",
+    255: "unknown",
+}
+TARGET_POSTURES = {0: "walk", 1: "sit", 2: "stand", 3: "lie", 4: "fall"}  # 255 = undefined (not reported)
 MOTION_EVENTS = {
     0: "enter",
     1: "left",
@@ -187,6 +200,12 @@ def to_bytes(value: object) -> bytes:
     raise ValueError(f"unsupported bitmask value {value!r}")
 
 
-def cell_from_index(cell: int) -> tuple[int, int]:
-    """Split the LocationInfo cell field (row << 8 | col)."""
-    return cell >> 8, cell & 0xFF
+CELL_CM = 50
+AHEAD_COL = 8
+
+
+def cell_from_position(x: int, y: int) -> tuple[int, int]:
+    """Grid cell of a position in cm: row 0 nearest the sensor, column 8 straight ahead, columns grow as x decreases."""
+    row = min(max(y // CELL_CM, 0), GRID_ROWS - 1)
+    col = min(max(AHEAD_COL - round((x + CELL_CM / 2) / CELL_CM), 0), GRID_COLS - 1)
+    return row, col

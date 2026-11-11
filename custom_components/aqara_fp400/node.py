@@ -51,11 +51,12 @@ from .const import (
     MOTION_UNRECOGNIZED,
     REGIONS,
     SENSOR_ENDPOINT,
+    TARGET_POSTURES,
     TARGET_TYPES,
     TARGETS_EXPIRE_S,
     WATCHED_ATTRIBUTES,
     ZONE_POLL_S,
-    cell_from_index,
+    cell_from_position,
     cells_to_mask,
     mask_to_cells,
     to_bytes,
@@ -103,11 +104,14 @@ class Target:
     zone_id: int | None
     kind: str = "person"
     snr: int | None = None
+    z: int | None = None
+    velocity: int | None = None
+    posture: str | None = None
 
     @property
     def is_person(self) -> bool:
         """False for targets the device classified as not a person (fan, pet, other)."""
-        return self.kind == "person"
+        return self.kind in ("person", "child")
 
     @property
     def zones(self) -> list[int]:
@@ -120,10 +124,13 @@ class Target:
             "id": self.target_id,
             "x": self.x,
             "y": self.y,
+            "z": self.z,
             "row": self.row,
             "col": self.col,
             "activity": self.activity,
             "type": self.kind,
+            "posture": self.posture,
+            "velocity": self.velocity,
             "snr": self.snr,
             "zones": self.zones,
         }
@@ -155,34 +162,44 @@ def parse_zone(raw: Any) -> Zone | None:
     if not isinstance(raw, dict):
         return None
     zone_id = _get(raw, "zoneId", "zoneID", 0)
-    mask = _get(raw, "cells", 2)
+    mask = _get(raw, "zoneBitmask", "cells", 2)
     if zone_id is None or mask is None:
         return None
     return Zone(
         zone_id=int(zone_id),
         cells=mask_to_cells(to_bytes(mask)),
-        enabled=bool(_get(raw, "enabled", 3, default=True)),
+        enabled=bool(_get(raw, "zoneProximityDetectionEnable", "enabled", 3, default=True)),
         zone_type=int(_get(raw, "zoneType", 1, default=0) or 0),
     )
 
 
 def parse_target(raw: Any) -> Target | None:
-    """Parse one entry of the LocationInfo targets list."""
+    """Parse one entry of the Location event.
+
+    Fields are read by Aqara's names, by the names matterjs-server used before PR #1269 and by tag. Firmware
+    1.1.8.2 sent a grid cell in field 3 and a 1/2 toggle in field 4; current firmware sends z and a velocity,
+    so the cell comes from x/y and a target counts as still while its velocity is 0.
+    """
     if not isinstance(raw, dict):
         return None
-    cell = int(_get(raw, "cell", 3, default=0) or 0)
-    row, col = cell_from_index(cell)
+    x = int(_get(raw, "targetXCoordinate", "x", 1, default=0) or 0)
+    y = int(_get(raw, "targetYCoordinate", "y", 2, default=0) or 0)
+    row, col = cell_from_position(x, y)
+    velocity = _int_or_none(_get(raw, "targetVelocity", "activityState", 4, default=None))
+    posture = _int_or_none(_get(raw, "targetPosture", "zoneId", 7, default=None))
     return Target(
         target_id=int(_get(raw, "targetId", "targetID", 0, default=0) or 0),
-        x=int(_get(raw, "x", 1, default=0) or 0),
-        y=int(_get(raw, "y", 2, default=0) or 0),
+        x=x,
+        y=y,
         row=row,
         col=col,
-        activity=ACTIVITY_STATES.get(int(_get(raw, "activityState", 4, default=0) or 0), "unknown"),
-        zone_id=_zone_id(_get(raw, "inZoneID", "inZoneId", "zoneMask", 8, default=None)),
-        # fields 5/6 were first named fallState/postureState; Aqara says they are SNR and target type
+        activity="unknown" if velocity is None else ("still" if velocity == 0 else "active"),
+        zone_id=_zone_id(_get(raw, "targetZoneId", "inZoneID", "inZoneId", "zoneMask", 8, default=None)),
         kind=TARGET_TYPES.get(int(_get(raw, "targetType", "postureState", 6, default=0) or 0), "unknown"),
-        snr=_int_or_none(_get(raw, "signalToNoiseRatio", "fallState", 5, default=None)),
+        snr=_int_or_none(_get(raw, "targetSignalToNoiseRatio", "signalToNoiseRatio", "fallState", 5, default=None)),
+        z=_int_or_none(_get(raw, "targetZCoordinate", "cell", 3, default=None)),
+        velocity=velocity,
+        posture=None if posture is None else TARGET_POSTURES.get(posture),
     )
 
 
@@ -705,13 +722,13 @@ class FP400Node:
         if data.cluster_id == CLUSTER_LOCATION and data.event_id == EVENT_LOCATION_INFO:
             if data.endpoint_id != SENSOR_ENDPOINT:
                 return
-            raw_targets = _get(payload, "targets", 0, default=[]) if isinstance(payload, dict) else []
+            raw_targets = _get(payload, "location", "targets", 0, default=[]) if isinstance(payload, dict) else []
             self.targets = [t for t in (parse_target(item) for item in raw_targets or []) if t is not None]
             self.targets_updated = dt_util.utcnow()
             self._schedule_target_expiry()
             self._notify_targets()
         elif data.cluster_id == CLUSTER_RADAR and data.event_id == EVENT_MOTION_DETECTED:
-            code = _get(payload, "motion", 0, default=None) if isinstance(payload, dict) else payload
+            code = _get(payload, "state", "motion", 0, default=None) if isinstance(payload, dict) else payload
             if not isinstance(code, int | str) or (isinstance(code, str) and not code.isdigit()):
                 LOGGER.debug("%s: unexpected MotionDetected payload %r", self.name, data.data)
                 return

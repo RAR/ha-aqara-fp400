@@ -82,12 +82,26 @@ async def test_location_event(hass: HomeAssistant, matter_client: MagicMock, fp4
     state = hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_tracked_people")
     assert state.state == "1"
     assert state.attributes["targets"] == [
-        {"id": 0, "x": -5, "y": 228, "row": 4, "col": 8, "activity": "still", "type": "person", "snr": 0, "zones": [1]}
+        {
+            "id": 0,
+            "x": -5,
+            "y": 228,
+            "z": 1032,
+            "row": 4,
+            "col": 8,
+            "activity": "active",
+            "type": "person",
+            "posture": None,
+            "velocity": 2,
+            "snr": 0,
+            "zones": [1],
+        }
     ]
 
-    # matter.js style payload with labels; a fan (field 6 = 2, the old "postureState") is listed but not counted
+    # labelled payloads: the person uses the names matterjs-server used before PR #1269, the fan (field 6 = 2)
+    # Aqara's own; the fan is listed but not counted, and still because its velocity is 0
     event.data = {
-        "targets": [
+        "location": [
             {
                 "targetId": 1,
                 "x": 10,
@@ -99,12 +113,14 @@ async def test_location_event(hass: HomeAssistant, matter_client: MagicMock, fp4
             },
             {
                 "targetId": 2,
-                "x": 60,
-                "y": 300,
-                "cell": 0x0607,
-                "activityState": 1,
-                "fallState": 4010,
-                "postureState": 2,
+                "targetXCoordinate": 60,
+                "targetYCoordinate": 300,
+                "targetZCoordinate": 40,
+                "targetVelocity": 0,
+                "targetSignalToNoiseRatio": 4010,
+                "targetType": 2,
+                "targetPosture": 255,
+                "targetZoneId": 1,
             },
         ]
     }
@@ -116,6 +132,9 @@ async def test_location_event(hass: HomeAssistant, matter_client: MagicMock, fp4
     assert state.attributes["targets"][0]["activity"] == "active"
     assert state.attributes["targets"][0]["snr"] == 1010
     assert state.attributes["targets"][1]["type"] == "fan"
+    assert state.attributes["targets"][1]["activity"] == "still"
+    assert state.attributes["targets"][1]["zones"] == [1]
+    assert state.attributes["targets"][1]["col"] == 6
 
     # forgetting a target sends the command and drops it locally
     device_id = er.async_get(hass).async_get("sensor.aqara_spatial_multi_sensor_fp400_radar_zones").device_id

@@ -24,7 +24,7 @@ const GUTTER = 1.6; // left gutter (grid units) for the distance labels
 // Cool hues only, so a zone is never mistaken for the green/red/amber region outlines.
 const ZONE_COLORS = ["#4f8ef7", "#a35bf7", "#19b5c9", "#e0409a", "#6e6cf0", "#7fb3ff", "#c084fc", "#ff8ad8"];
 const REGION_KEYS = ["entry_exit", "interference", "monitoring"];
-const TARGET_LABELS = { person: "Person", not_person: "Not a person", fan: "Fan", pet: "Pet", unknown: "Unknown target" };
+const TARGET_LABELS = { person: "Person", not_person: "Not a person", fan: "Fan", pet: "Pet", curtain: "Curtain", green_plants: "Plant", sweeper: "Robot vacuum", air_purifier: "Air purifier", child: "Child", unknown: "Unknown target" };
 const REGION_META = {
   entry_exit: { label: "Entry/Exit", color: "#3bbf6a", dash: "", help: "Where people walk in and out. Paint the doorway cells." },
   interference: { label: "Interference", color: "#f75f4f", dash: "", help: "Things that fool the radar (fans, curtains). Paint them to ignore them." },
@@ -368,7 +368,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
     const live = !!targetsState?.attributes?.live_tracking;
     root.querySelector(".live-dot").classList.toggle("on", live);
     const activity = targetsState?.attributes?.activity_state;
-    const people = targets.filter((t) => !t.type || t.type === "person").length;
+    const people = targets.filter((t) => !t.type || t.type === "person" || t.type === "child").length;
     const others = targets.length - people;
     root.querySelector(".sub-text").textContent = state
       ? `${people === 1 ? "1 person" : `${people} people`}${others ? ` + ${others} other` : ""}${activity && activity !== "unknown" ? ` · ${activity}` : ""}${live ? " · live" : " · live tracking off"}`
@@ -418,7 +418,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
       const cx = Math.min(COLS - 0.3, Math.max(0.3, AHEAD_COL - t.x / CELL_CM));
       const cy = Math.min(ROWS - 0.3, Math.max(0.3, this._distY(t.y)));
       const still = t.activity === "still";
-      const person = !t.type || t.type === "person";
+      const person = !t.type || t.type === "person" || t.type === "child";
       if (!still && person) this._targetLayer.appendChild(this._el("circle", { cx, cy, r: 0.7 }, "target-halo"));
       const dot = this._el("circle", { cx, cy, r: 0.36 }, "target" + (still ? " still" : "") + (person ? "" : " other"));
       const title = this._el("title");
