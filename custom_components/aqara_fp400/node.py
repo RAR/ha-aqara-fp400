@@ -69,7 +69,9 @@ class Zone:
 
     zone_id: int
     cells: list[list[int]]
-    enabled: bool = True
+    # field 3 of the zone struct: per Aqara's extension this enables proximity detection for the zone, it does not
+    # switch the zone off (it was exposed as `enabled` before 1.3.6)
+    proximity_detection: bool = True
     zone_type: int = 0
 
     def as_dict(self) -> dict[str, Any]:
@@ -77,7 +79,7 @@ class Zone:
         return {
             "id": self.zone_id,
             "type": self.zone_type,
-            "enabled": self.enabled,
+            "proximity_detection": self.proximity_detection,
             "cells": self.cells,
         }
 
@@ -87,7 +89,7 @@ class Zone:
             "zoneId": self.zone_id,
             "zoneType": self.zone_type,
             "cells": cells_to_mask(tuple(c) for c in self.cells),
-            "enabled": self.enabled,
+            "enabled": self.proximity_detection,
         }
 
 
@@ -154,7 +156,9 @@ def _event_payload(data: Any) -> Any:
 
 
 def _zone_signature(zones: list[Zone]) -> list[tuple[int, int, bool, tuple[tuple[int, int], ...]]]:
-    return sorted((z.zone_id, z.zone_type, z.enabled, tuple(tuple(c) for c in sorted(z.cells))) for z in zones)
+    return sorted(
+        (z.zone_id, z.zone_type, z.proximity_detection, tuple(tuple(c) for c in sorted(z.cells))) for z in zones
+    )
 
 
 def parse_zone(raw: Any) -> Zone | None:
@@ -168,7 +172,7 @@ def parse_zone(raw: Any) -> Zone | None:
     return Zone(
         zone_id=int(zone_id),
         cells=mask_to_cells(to_bytes(mask)),
-        enabled=bool(_get(raw, "zoneProximityDetectionEnable", "enabled", 3, default=True)),
+        proximity_detection=bool(_get(raw, "zoneProximityDetectionEnable", "enabled", 3, default=True)),
         zone_type=int(_get(raw, "zoneType", 1, default=0) or 0),
     )
 

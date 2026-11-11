@@ -53,7 +53,7 @@ Running the FP400 on Zigbee instead? This integration does not apply; see
 
 | Entity | Meaning |
 |---|---|
-| `sensor.<name>_radar_zones` | number of zones; attribute `zones` holds `[{id, name, type, enabled, cells: [[row, col], …]}]`; `learning_until` / `learning_zones` while and after background learning |
+| `sensor.<name>_radar_zones` | number of zones; attribute `zones` holds `[{id, name, type, proximity_detection, cells: [[row, col], …]}]`; `learning_until` / `learning_zones` while and after background learning |
 | `sensor.<name>_radar_regions` | number of non-empty regions; attribute `regions` holds `{entry_exit, interference, monitoring: [[row, col], …]}` |
 | `sensor.<name>_radar_tracked_people` | people currently tracked; attribute `targets` = `[{id, x, y, z, row, col, activity, type, posture, velocity, snr, zones}]` (cm); `type` is person / child / not_person / fan / pet / curtain / green_plants / sweeper / air_purifier when *AI Enhanced Person Detection* is on in the Aqara app (always person otherwise), and only persons and children are counted; `activity` is still while the velocity is 0; `posture` (walk / sit / stand / lie / fall) is null unless the device reports one |
 | `sensor.<name>_radar_target_N_x` / `_y` | position of target N (disabled by default; enable for radar map cards) |
@@ -84,7 +84,7 @@ data:
       cells: "3-4,6-10"        # rows 3-4, columns 6-10
     - id: 2
       cells: [[2, 8], [2, 9]]  # explicit [row, column] cells
-      enabled: true
+      proximity_detection: true  # the zone's "proximity detection" setting (was `enabled` before 1.3.6)
 ```
 
 `aqara_fp400.clear_zones`, `aqara_fp400.subscribe_location` (timeout in seconds, max 3600) and
@@ -140,7 +140,8 @@ or with `select.<name>_radar_side_install_position`.
 
 Pick a layer at the top (Zones, or one of the three regions), select a zone chip or **Add zone**, then click or drag on
 the grid to paint (painting over another zone's cell moves the cell; **Erase** removes cells from any zone). The panel
-under the chips names, enables/disables or deletes the selected zone. **Learn** runs the sensor's AI background learning
+under the chips names, deletes or toggles proximity detection for the selected zone (that flag is what the zone
+struct carries; a zone cannot be switched off — delete it instead). **Learn** runs the sensor's AI background learning
 (it proposes zones itself after watching the room for about half a minute); the card counts down and reloads the zones. Regions are drawn as outlines and painted as a fill while
 you edit them. **Save** writes the change to the device. Tracked people are drawn as dots (hollow when still); cells
 outside the monitoring range are shaded; targets the sensor has classified as a fan, pet or other non-person are grey and

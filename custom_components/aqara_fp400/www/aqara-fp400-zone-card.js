@@ -44,7 +44,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
     this._top = config.sensor_at !== "bottom"; // sensor drawn at the top, room extends downward (as in the Aqara app)
     if (config.mount && !["wall", "left_corner", "right_corner"].includes(config.mount)) throw new Error("mount must be wall, left_corner or right_corner");
     this._mode = "zones"; // "zones" or a REGION_KEYS entry
-    this._edit = null; // zones edit: Map<id, {cells:Set, enabled, type}>
+    this._edit = null; // zones edit: Map<id, {cells:Set, proximity, type, name}>
     this._regionEdit = null; // region edit: {key, cells:Set}
     this._active = 1;
     this._pointerDown = false;
@@ -95,7 +95,6 @@ class AqaraFp400ZoneCard extends HTMLElement {
         .cell { stroke: var(--divider-color, rgba(127,127,127,0.3)); stroke-width: 0.025; fill: var(--primary-text-color); fill-opacity: 0; cursor: crosshair; transition: fill-opacity 0.1s; }
         .cell.outside { fill-opacity: 0.07; }
         .cell.painted { fill-opacity: 0.6; }
-        .cell.painted.disabled { fill-opacity: 0.18; }
         .cell.region-tint { fill-opacity: 0.16; }
         .cell.region-fill { fill-opacity: 0.45; }
         .cell.hover-zone:hover { fill-opacity: 0.35; }
@@ -269,7 +268,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
     const state = this._hass?.states[this._config.entity];
     const zones = new Map();
     for (const zone of state?.attributes?.zones || []) {
-      zones.set(zone.id, { cells: new Set(zone.cells.map(([r, c]) => r * COLS + c)), enabled: zone.enabled !== false, type: zone.type || 0, name: zone.name || "" });
+      zones.set(zone.id, { cells: new Set(zone.cells.map(([r, c]) => r * COLS + c)), proximity: (zone.proximity_detection ?? zone.enabled) !== false, type: zone.type || 0, name: zone.name || "" });
     }
     return zones;
   }
@@ -393,7 +392,6 @@ class AqaraFp400ZoneCard extends HTMLElement {
         rect.style.fill = REGION_META[editingRegion].color;
       } else if (zoneId !== null) {
         rect.classList.add(editingRegion ? "region-tint" : "painted");
-        if (!editingRegion) rect.classList.toggle("disabled", zones.get(zoneId).enabled === false);
         rect.style.fill = this._zoneColor(zoneId);
       } else if (shadeOutside && !monitored.has(idx)) {
         rect.classList.add("outside");
@@ -434,7 +432,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
     // swallows the click.
     const key = JSON.stringify([
       this._mode, this._active, !!this._saving, !!this._edit, this._regionEdit?.key, !!this._confirmedEmpty, this._forget,
-      [...zones].map(([id, z]) => [id, z.cells.size, z.enabled, z.name]),
+      [...zones].map(([id, z]) => [id, z.cells.size, z.proximity, z.name]),
       REGION_KEYS.map((k) => regions[k].size),
       state?.attributes?.max_zones,
       this._learning(state).active,
@@ -569,8 +567,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
       const exists = zones.has(id);
       const chip = document.createElement("span");
       chip.className = "chip" + (this._active === id ? " active" : "") + (exists ? "" : " new");
-      const disabled = exists && zones.get(id).enabled === false;
-      chip.innerHTML = `<span class="dot" style="background:${this._zoneColor(id)}"></span><span>${exists ? this._esc(this._zoneLabel(id, zones)) : `Zone ${id}`}</span>` + (exists ? `<span class="n">${disabled ? "off" : zones.get(id).cells.size}</span>` : "");
+      chip.innerHTML = `<span class="dot" style="background:${this._zoneColor(id)}"></span><span>${exists ? this._esc(this._zoneLabel(id, zones)) : `Zone ${id}`}</span>` + (exists ? `<span class="n">${zones.get(id).cells.size}</span>` : "");
       chip.title = exists ? `Select zone ${id} to paint it` : "New zone — paint cells on the grid";
       chip.addEventListener("click", () => { this._active = id; this._render(); });
       tools.appendChild(chip);
@@ -606,7 +603,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
     if (zones.has(this._active)) {
       const zone = zones.get(this._active);
       panel.innerHTML = `<span class="name"><span class="dot" style="background:${this._zoneColor(this._active)}"></span>${this._esc(this._zoneLabel(this._active, zones))}</span>
-        <span class="meta">${zone.name ? `zone ${this._active} · ` : ""}${zone.cells.size} cells · ${zone.enabled ? "enabled" : "disabled"}</span><span class="spacer"></span>`;
+        <span class="meta">${zone.name ? `zone ${this._active} · ` : ""}${zone.cells.size} cells · proximity ${zone.proximity ? "on" : "off"}</span><span class="spacer"></span>`;
       const group = document.createElement("span");
       group.className = "btns";
       const rename = document.createElement("button");
@@ -617,9 +614,10 @@ class AqaraFp400ZoneCard extends HTMLElement {
       group.appendChild(rename);
       const toggle = document.createElement("button");
       toggle.className = "secondary small";
-      toggle.textContent = zone.enabled ? "Disable" : "Enable";
+      toggle.textContent = zone.proximity ? "Proximity off" : "Proximity on";
+      toggle.title = "The zone's proximity detection setting (field 3 of the zone struct)";
       toggle.disabled = this._saving;
-      toggle.addEventListener("click", () => this._toggleEnabled(this._active));
+      toggle.addEventListener("click", () => this._toggleProximity(this._active));
       group.appendChild(toggle);
       const del = document.createElement("button");
       del.className = "secondary small danger";
@@ -761,7 +759,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
     }
     for (const zone of zones.values()) zone.cells.delete(index);
     if (this._active !== 0 && this._paintValue) {
-      if (!zones.has(this._active)) zones.set(this._active, { cells: new Set(), enabled: true, type: 0 });
+      if (!zones.has(this._active)) zones.set(this._active, { cells: new Set(), proximity: true, type: 0 });
       zones.get(this._active).cells.add(index);
     }
     for (const [id, zone] of [...zones]) if (zone.cells.size === 0) zones.delete(id);
@@ -774,9 +772,9 @@ class AqaraFp400ZoneCard extends HTMLElement {
     else cells.delete(index);
   }
 
-  _toggleEnabled(id) {
+  _toggleProximity(id) {
     const zones = this._startEdit();
-    if (zones.has(id)) zones.get(id).enabled = !zones.get(id).enabled;
+    if (zones.has(id)) zones.get(id).proximity = !zones.get(id).proximity;
     this._render();
   }
 
@@ -816,7 +814,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
     this._confirmedEmpty = false;
     const zones = [...this._zones()].map(([id, zone]) => ({
       id,
-      enabled: zone.enabled,
+      proximity_detection: zone.proximity,
       type: zone.type || 0,
       cells: this._cellsToRowCol(zone.cells),
     }));

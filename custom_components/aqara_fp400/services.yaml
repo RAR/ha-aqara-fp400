@@ -14,7 +14,7 @@ set_zones:
           cells: "3-4,6-10"
         - id: 2
           cells: [[2, 8], [2, 9], [3, 8], [3, 9]]
-          enabled: true
+          proximity_detection: true
       selector:
         object:
 clear_zones:

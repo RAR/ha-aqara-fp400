@@ -250,7 +250,8 @@ ZONE_SCHEMA = vol.Schema(
     {
         vol.Required("id"): vol.All(vol.Coerce(int), vol.Range(min=1, max=8)),
         vol.Required("cells"): _cell_list,
-        vol.Optional("enabled", default=True): cv.boolean,
+        vol.Optional("proximity_detection"): cv.boolean,
+        vol.Optional("enabled"): cv.boolean,  # name used before 1.3.6
         vol.Optional("type", default=0): vol.Coerce(int),
     }
 )
@@ -316,7 +317,12 @@ def _async_register_services(hass: HomeAssistant, entry: FP400ConfigEntry) -> No
     async def set_zones(call: ServiceCall) -> dict[str, Any]:
         fp = _node_for_device(hass, call.data["device_id"])
         zones = [
-            Zone(zone_id=z["id"], cells=z["cells"], enabled=z["enabled"], zone_type=z["type"])
+            Zone(
+                zone_id=z["id"],
+                cells=z["cells"],
+                proximity_detection=z.get("proximity_detection", z.get("enabled", True)),
+                zone_type=z["type"],
+            )
             for z in call.data["zones"]
         ]
         try:

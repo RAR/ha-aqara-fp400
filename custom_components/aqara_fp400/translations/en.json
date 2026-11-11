@@ -156,7 +156,7 @@
         },
         "zones": {
           "name": "Zones",
-          "description": "List of zones with id (1-8), cells and optional enabled flag."
+          "description": "List of zones with id (1-8), cells, optional type and optional proximity_detection flag."
         }
       }
     },

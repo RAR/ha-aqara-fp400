@@ -51,7 +51,9 @@ async def test_entities(hass: HomeAssistant, fp400) -> None:
     zones = hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_zones")
     assert zones is not None, [s.entity_id for s in hass.states.async_all() if "fp400" in s.entity_id]
     assert zones.state == "1"
-    assert zones.attributes["zones"] == [{"id": 1, "type": 0, "enabled": True, "cells": [[4, 8], [4, 9]], "name": None}]
+    assert zones.attributes["zones"] == [
+        {"id": 1, "type": 0, "proximity_detection": True, "cells": [[4, 8], [4, 9]], "name": None}
+    ]
     assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_tracked_people").state == "0"
     assert hass.states.get("switch.aqara_spatial_multi_sensor_fp400_radar_live_tracking").state == "off"
     assert hass.states.get("button.aqara_spatial_multi_sensor_fp400_radar_clear_zones") is not None
@@ -174,7 +176,7 @@ async def test_set_zones_service(hass: HomeAssistant, matter_client: MagicMock, 
         "set_zones",
         {
             "device_id": device.id,
-            "zones": [{"id": 2, "cells": "3-4,6-10"}, {"id": 5, "cells": [[0, 0]], "enabled": False}],
+            "zones": [{"id": 2, "cells": "3-4,6-10"}, {"id": 5, "cells": [[0, 0]], "proximity_detection": False}],
         },
         blocking=True,
         return_response=True,
