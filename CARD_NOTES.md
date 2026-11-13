@@ -39,6 +39,6 @@ Commit + `git push origin main` when happy.
   discover — could be made more obvious.
 - Grid cell borders + region outlines + target dots can get busy; a design pass could calm the visual hierarchy.
 
-Current version: 1.3.6 (design pass 2026-09-21: segmented layer bar, cool-only zone palette, distance labels,
+Current version: 1.3.7 (design pass 2026-09-21: segmented layer bar, cool-only zone palette, distance labels,
 shaded area outside monitoring, selected-zone panel with Name / Proximity on-off / Delete, sync pill, footer Save bar). Commits are on `main` (github.com/RAR/ha-aqara-fp400). Full protocol/verification notes:
 `~/fp400/VERIFY_1196.md`, `~/fp400/NOTES.md`; upstream PR handoff `~/fp400/PR_NOTES.md`.

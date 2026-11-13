@@ -194,6 +194,9 @@ async def test_set_zones_service(hass: HomeAssistant, matter_client: MagicMock, 
     bits = {i for i in range(320) if mask[i // 8] & (0x80 >> (i % 8))}
     assert bits == {3 * 16 + c for c in range(6, 11)} | {4 * 16 + c for c in range(6, 11)}
     assert zones[1]["cells"][0] == 0x80 and zones[1]["enabled"] is False
+    # Both label sets go out so the write works before and after matterjs-server#1269 (1.5.6).
+    assert zones[1]["zoneBitmask"] == zones[1]["cells"]
+    assert zones[1]["zoneProximityDetectionEnable"] is False and zones[0]["zoneProximityDetectionEnable"] is True
     assert response["zones"][0]["id"] == 2
     state = hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_zones")
     assert state.state == "2"

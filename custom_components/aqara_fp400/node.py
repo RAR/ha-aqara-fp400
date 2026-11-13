@@ -84,12 +84,20 @@ class Zone:
         }
 
     def as_payload(self) -> dict[str, Any]:
-        """Struct as the Matter server expects it (field labels of the vendor cluster)."""
+        """Struct as the Matter server expects it (field labels of the vendor cluster).
+
+        The server renamed the struct fields in matterjs-server#1269 (1.5.6); both spellings are
+        sent because the server maps the labels it knows and ignores the rest, so one payload
+        works on either side of the rename.
+        """
+        mask = cells_to_mask(tuple(c) for c in self.cells)
         return {
             "zoneId": self.zone_id,
             "zoneType": self.zone_type,
-            "cells": cells_to_mask(tuple(c) for c in self.cells),
-            "enabled": self.proximity_detection,
+            "zoneBitmask": mask,
+            "zoneProximityDetectionEnable": self.proximity_detection,
+            "cells": mask,  # label before matterjs-server 1.5.6
+            "enabled": self.proximity_detection,  # label before matterjs-server 1.5.6
         }
 
 

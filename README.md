@@ -28,6 +28,8 @@ Running the FP400 on Zigbee instead? This integration does not apply; see
   1.5.0 or newer (it gained them in [#1079](https://github.com/matter-js/matterjs-server/pull/1079)). The Home
   Assistant Matter Server add-on has it from version 9.3.0. Reading works without it; zone commands and the position
   stream need it, and fail on older servers with "Attribute … on cluster 291503114 unknown".
+  Servers from 1.5.6 on carry Aqara's official cluster definitions ([#1269](https://github.com/matter-js/matterjs-server/pull/1269));
+  this integration works with both (zone writes on a 1.5.6 server need 1.3.7 or newer).
 - **A Matter fabric with a vendor ID the FP400 trusts.** The device answers every explicit read, write and command on its
   vendor clusters with `UnsupportedAttribute` (status 134) when the fabric's vendor ID is 0x134B — the Nabu Casa ID the
   Home Assistant Matter Server add-on commissions with — even though it advertises the attributes. Plain occupancy and
