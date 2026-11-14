@@ -879,11 +879,13 @@ class FP400Node:
     @staticmethod
     def _check_status(result: Any) -> None:
         """Raise on a non-zero zone command status."""
+        # The response struct's single field is labelled "status" before matterjs-server 1.6.0
+        # and "errorCode" from then on; tag 0 covers servers that key by tag.
         status = None
         if isinstance(result, dict):
-            status = _get(result, "status", 0, default=None)
+            status = _get(result, "status", "errorCode", 0, default=None)
             if status is None and "Any" in result and isinstance(result["Any"], dict):
-                status = _get(result["Any"], "status", 0, default=None)
+                status = _get(result["Any"], "status", "errorCode", 0, default=None)
         if status not in (None, 0):
             names = {
                 1: "invalid argument",

@@ -616,6 +616,18 @@ async def test_unrecognized_motion_code(
     assert hass.states.get(last).state == "enter"
 
 
+async def test_set_zones_error_code_label(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:
+    """matterjs-server 1.6.0 labels the zone response field errorCode; a rejection must still raise."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    call = {"device_id": _radar_device(hass), "zones": [{"id": 2, "cells": "3-4,6-10"}]}
+    matter_client.send_command.return_value = {"errorCode": 5}
+    with pytest.raises(HomeAssistantError, match="duplicate zone id"):
+        await hass.services.async_call("aqara_fp400", "set_zones", call, blocking=True)
+    matter_client.send_command.return_value = {"errorCode": 0}
+    await hass.services.async_call("aqara_fp400", "set_zones", call, blocking=True)
+
+
 @pytest.mark.parametrize("cells", ["10-5,0-15", "0-20,0-15", "0-19,0-16", "3-4", "a,1", "3-4,", "1-,2"])
 async def test_cell_spec_rejects_reversed_or_out_of_grid_ranges(
     hass: HomeAssistant, matter_client: MagicMock, fp400, cells: str
