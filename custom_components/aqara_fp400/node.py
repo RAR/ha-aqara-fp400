@@ -113,9 +113,9 @@ class Target:
     activity: str
     zone_id: int | None
     kind: str = "person"
-    snr: int | None = None
-    z: int | None = None
-    velocity: int | None = None
+    dynamic_points: int | None = None
+    micro_motion_points: int | None = None
+    tracking_state: int | None = None
     posture: str | None = None
 
     @property
@@ -134,14 +134,14 @@ class Target:
             "id": self.target_id,
             "x": self.x,
             "y": self.y,
-            "z": self.z,
             "row": self.row,
             "col": self.col,
             "activity": self.activity,
             "type": self.kind,
             "posture": self.posture,
-            "velocity": self.velocity,
-            "snr": self.snr,
+            "dynamic_points": self.dynamic_points,
+            "micro_motion_points": self.micro_motion_points,
+            "tracking_state": self.tracking_state,
             "zones": self.zones,
         }
 
@@ -188,16 +188,18 @@ def parse_zone(raw: Any) -> Zone | None:
 def parse_target(raw: Any) -> Target | None:
     """Parse one entry of the Location event.
 
-    Fields are read by Aqara's names, by the names matterjs-server used before PR #1269 and by tag. Firmware
-    1.1.8.2 sent a grid cell in field 3 and a 1/2 toggle in field 4; current firmware sends z and a velocity,
-    so the cell comes from x/y and a target counts as still while its velocity is 0.
+    Fields are read by Aqara's names (matterjs-server PR #1298), by the names earlier servers used and by tag.
+    Fields 3 to 5 are the tracking packet: dynamic point-cloud points, micro-motion point-cloud points and a
+    packed tracking state (firmware 1.1.8.2 sent a grid cell, an activity and a fall flag there instead). The
+    cell comes from x/y. A target counts as still while field 4 is 0; whether that or field 3 is the intended
+    motion signal is open with Aqara on PR #1298.
     """
     if not isinstance(raw, dict):
         return None
     x = int(_get(raw, "targetXCoordinate", "x", 1, default=0) or 0)
     y = int(_get(raw, "targetYCoordinate", "y", 2, default=0) or 0)
     row, col = cell_from_position(x, y)
-    velocity = _int_or_none(_get(raw, "targetVelocity", "activityState", 4, default=None))
+    micro_motion = _int_or_none(_get(raw, "mmsPnts", "targetVelocity", "activityState", 4, default=None))
     posture = _int_or_none(_get(raw, "targetPosture", "zoneId", 7, default=None))
     return Target(
         target_id=int(_get(raw, "targetId", "targetID", 0, default=0) or 0),
@@ -205,12 +207,14 @@ def parse_target(raw: Any) -> Target | None:
         y=y,
         row=row,
         col=col,
-        activity="unknown" if velocity is None else ("still" if velocity == 0 else "active"),
+        activity="unknown" if micro_motion is None else ("still" if micro_motion == 0 else "active"),
         zone_id=_zone_id(_get(raw, "targetZoneId", "inZoneID", "inZoneId", "zoneMask", 8, default=None)),
         kind=TARGET_TYPES.get(int(_get(raw, "targetType", "postureState", 6, default=0) or 0), "unknown"),
-        snr=_int_or_none(_get(raw, "targetSignalToNoiseRatio", "signalToNoiseRatio", "fallState", 5, default=None)),
-        z=_int_or_none(_get(raw, "targetZCoordinate", "cell", 3, default=None)),
-        velocity=velocity,
+        dynamic_points=_int_or_none(_get(raw, "dynPnts", "targetZCoordinate", "cell", 3, default=None)),
+        micro_motion_points=micro_motion,
+        tracking_state=_int_or_none(
+            _get(raw, "trackingState", "targetSignalToNoiseRatio", "signalToNoiseRatio", "fallState", 5, default=None)
+        ),
         posture=None if posture is None else TARGET_POSTURES.get(posture),
     )
 

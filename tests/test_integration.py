@@ -88,20 +88,20 @@ async def test_location_event(hass: HomeAssistant, matter_client: MagicMock, fp4
             "id": 0,
             "x": -5,
             "y": 228,
-            "z": 1032,
             "row": 4,
             "col": 8,
             "activity": "active",
             "type": "person",
             "posture": None,
-            "velocity": 2,
-            "snr": 0,
+            "dynamic_points": 1032,
+            "micro_motion_points": 2,
+            "tracking_state": 0,
             "zones": [1],
         }
     ]
 
     # labelled payloads: the person uses the names matterjs-server used before PR #1269, the fan (field 6 = 2)
-    # Aqara's own; the fan is listed but not counted, and still because its velocity is 0
+    # Aqara's own from PR #1298; the fan is listed but not counted, and still because its micro-motion count is 0
     event.data = {
         "location": [
             {
@@ -117,11 +117,11 @@ async def test_location_event(hass: HomeAssistant, matter_client: MagicMock, fp4
                 "targetId": 2,
                 "targetXCoordinate": 60,
                 "targetYCoordinate": 300,
-                "targetZCoordinate": 40,
-                "targetVelocity": 0,
-                "targetSignalToNoiseRatio": 4010,
+                "dynPnts": 40,
+                "mmsPnts": 0,
+                "trackingState": 4010,
                 "targetType": 2,
-                "targetPosture": 255,
+                "targetPosture": 5,
                 "targetZoneId": 1,
             },
         ]
@@ -132,9 +132,11 @@ async def test_location_event(hass: HomeAssistant, matter_client: MagicMock, fp4
     assert state.state == "1"
     assert state.attributes["targets"][0]["col"] == 7
     assert state.attributes["targets"][0]["activity"] == "active"
-    assert state.attributes["targets"][0]["snr"] == 1010
+    assert state.attributes["targets"][0]["tracking_state"] == 1010
     assert state.attributes["targets"][1]["type"] == "fan"
     assert state.attributes["targets"][1]["activity"] == "still"
+    assert state.attributes["targets"][1]["dynamic_points"] == 40
+    assert state.attributes["targets"][1]["posture"] == "suspected_fall"
     assert state.attributes["targets"][1]["zones"] == [1]
     assert state.attributes["targets"][1]["col"] == 6
 

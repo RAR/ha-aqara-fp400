@@ -119,8 +119,10 @@ TARGETS_EXPIRE_S = 30
 ZONE_POLL_S = 120  # re-read zones; the device does not push attr 16 changes (e.g. zones set in the Aqara app)
 
 ACTIVITY_STATES = {0: "unknown", 1: "active", 2: "still"}
-# Target struct of the Location event, per Aqara's manufacturer extension (matterjs-server PR #1269):
-# 0 id, 1 x, 2 y, 3 z (cm), 4 velocity, 5 signal-to-noise ratio, 6 target type, 7 posture, 8 zone id.
+# Target struct of the Location event, per Aqara's manufacturer extension (matterjs-server PRs #1269 and #1298):
+# 0 id, 1 x, 2 y, 3 dynamic point-cloud points, 4 micro-motion point-cloud points, 5 packed tracking state,
+# 6 target type, 7 posture, 8 zone id (0 = in no configured zone). Firmware 1.1.8.2 sent a grid index, an
+# activity and a fall flag in fields 3 to 5 instead. Enums use 254 for unknown and 255 for invalid.
 # Types other than person are reported only while "AI Enhanced Person Detection" (attr 41) is on.
 TARGET_TYPES = {
     0: "person",
@@ -132,9 +134,11 @@ TARGET_TYPES = {
     6: "sweeper",
     7: "air_purifier",
     8: "child",
+    254: "unknown",
     255: "unknown",
 }
-TARGET_POSTURES = {0: "walk", 1: "sit", 2: "stand", 3: "lie", 4: "fall"}  # 255 = undefined (not reported)
+# 254 (unknown) and 255 (invalid) are reported as no posture.
+TARGET_POSTURES = {0: "walk", 1: "sit", 2: "stand", 3: "lie", 4: "fall", 5: "suspected_fall"}
 MOTION_EVENTS = {
     0: "enter",
     1: "left",
