@@ -101,7 +101,7 @@ async def test_location_event(hass: HomeAssistant, matter_client: MagicMock, fp4
     ]
 
     # labelled payloads: the person uses the names matterjs-server used before PR #1269, the fan (field 6 = 2)
-    # Aqara's own from PR #1298; the fan is listed but not counted, and still because its micro-motion count is 0
+    # Aqara's own from PR #1298; the fan is listed but not counted, and still because its dynamic point count is 0
     event.data = {
         "location": [
             {
@@ -117,8 +117,8 @@ async def test_location_event(hass: HomeAssistant, matter_client: MagicMock, fp4
                 "targetId": 2,
                 "targetXCoordinate": 60,
                 "targetYCoordinate": 300,
-                "dynPnts": 40,
-                "mmsPnts": 0,
+                "dynPnts": 0,
+                "mmsPnts": 40,
                 "trackingState": 4010,
                 "targetType": 2,
                 "targetPosture": 5,
@@ -135,7 +135,7 @@ async def test_location_event(hass: HomeAssistant, matter_client: MagicMock, fp4
     assert state.attributes["targets"][0]["tracking_state"] == 1010
     assert state.attributes["targets"][1]["type"] == "fan"
     assert state.attributes["targets"][1]["activity"] == "still"
-    assert state.attributes["targets"][1]["dynamic_points"] == 40
+    assert state.attributes["targets"][1]["micro_motion_points"] == 40
     assert state.attributes["targets"][1]["posture"] == "suspected_fall"
     assert state.attributes["targets"][1]["zones"] == [1]
     assert state.attributes["targets"][1]["col"] == 6

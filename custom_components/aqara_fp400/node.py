@@ -191,15 +191,16 @@ def parse_target(raw: Any) -> Target | None:
     Fields are read by Aqara's names (matterjs-server PR #1298), by the names earlier servers used and by tag.
     Fields 3 to 5 are the tracking packet: dynamic point-cloud points, micro-motion point-cloud points and a
     packed tracking state (firmware 1.1.8.2 sent a grid cell, an activity and a fall flag there instead). The
-    cell comes from x/y. A target counts as still while field 4 is 0; whether that or field 3 is the intended
-    motion signal is open with Aqara on PR #1298.
+    cell comes from x/y. A target counts as still while its dynamic point count is 0: per Aqara (PR #1298) that
+    count is above 0 for any noticeable movement, including moving in place, and 0 for micro-motion only such as
+    sitting quietly. (On 1.1.8.2 field 3 is a grid index, so such a unit always reads as active.)
     """
     if not isinstance(raw, dict):
         return None
     x = int(_get(raw, "targetXCoordinate", "x", 1, default=0) or 0)
     y = int(_get(raw, "targetYCoordinate", "y", 2, default=0) or 0)
     row, col = cell_from_position(x, y)
-    micro_motion = _int_or_none(_get(raw, "mmsPnts", "targetVelocity", "activityState", 4, default=None))
+    dynamic = _int_or_none(_get(raw, "dynPnts", "targetZCoordinate", "cell", 3, default=None))
     posture = _int_or_none(_get(raw, "targetPosture", "zoneId", 7, default=None))
     return Target(
         target_id=int(_get(raw, "targetId", "targetID", 0, default=0) or 0),
@@ -207,11 +208,11 @@ def parse_target(raw: Any) -> Target | None:
         y=y,
         row=row,
         col=col,
-        activity="unknown" if micro_motion is None else ("still" if micro_motion == 0 else "active"),
+        activity="unknown" if dynamic is None else ("still" if dynamic == 0 else "active"),
         zone_id=_zone_id(_get(raw, "targetZoneId", "inZoneID", "inZoneId", "zoneMask", 8, default=None)),
         kind=TARGET_TYPES.get(int(_get(raw, "targetType", "postureState", 6, default=0) or 0), "unknown"),
-        dynamic_points=_int_or_none(_get(raw, "dynPnts", "targetZCoordinate", "cell", 3, default=None)),
-        micro_motion_points=micro_motion,
+        dynamic_points=dynamic,
+        micro_motion_points=_int_or_none(_get(raw, "mmsPnts", "targetVelocity", "activityState", 4, default=None)),
         tracking_state=_int_or_none(
             _get(raw, "trackingState", "targetSignalToNoiseRatio", "signalToNoiseRatio", "fallState", 5, default=None)
         ),
