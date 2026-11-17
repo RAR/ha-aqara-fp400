@@ -10,7 +10,6 @@ import contextlib
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
-import shutil
 from typing import Any
 
 from homeassistant.components.matter.helpers import get_matter
@@ -162,11 +161,17 @@ async def _async_migrate_legacy(hass: HomeAssistant, entry: FP400ConfigEntry) ->
     The integration was renamed from aqara_fp400 to aqara_fp400_matter for the HACS catalog (the old
     domain was taken). HACS installs the new version next to the old folder, so the old entry keeps
     loading until it is migrated here: its radar device and entities are re-pointed at this entry
-    (entity ids, names, areas and customizations survive), zone names are copied, the old entry is
-    removed and the old folder is deleted when it is this integration's own code.
+    (entity ids, names, areas and customizations survive), zone names are copied and the old entry is
+    removed. The old folder is left in place; nothing loads it once its entry is gone. If a different
+    integration owns the old domain (its manifest does not point at this repository), nothing is touched.
     """
     old_entries = hass.config_entries.async_entries(LEGACY_DOMAIN)
     if not old_entries:
+        return
+    folder = Path(hass.config.path("custom_components", LEGACY_DOMAIN))
+    owner = await hass.async_add_executor_job(_legacy_folder_owner, folder)
+    if owner == "other":
+        LOGGER.warning("%s is another integration with the old domain; leaving it and its setup alone", folder)
         return
     device_registry = dr.async_get(hass)
     entity_registry = er.async_get(hass)
@@ -195,23 +200,19 @@ async def _async_migrate_legacy(hass: HomeAssistant, entry: FP400ConfigEntry) ->
             )
         await hass.config_entries.async_remove(old.entry_id)
         LOGGER.info("Moved the %s setup to %s", LEGACY_DOMAIN, DOMAIN)
-    await hass.async_add_executor_job(_remove_legacy_folder, Path(hass.config.path("custom_components", LEGACY_DOMAIN)))
+    if owner == "ours":
+        LOGGER.info("The old folder %s is no longer used; it can be deleted", folder)
 
 
-def _remove_legacy_folder(folder: Path) -> None:
-    """Delete the pre-1.4.0 copy of this integration, and only that (not a different integration with that domain)."""
+def _legacy_folder_owner(folder: Path) -> str:
+    """ "ours" for the pre-1.4.0 copy of this integration, "other" for a different integration, "none" if absent."""
     manifest = folder / "manifest.json"
     if not manifest.is_file():
-        return
+        return "none"
     try:
-        ours = json.loads(manifest.read_text()).get("documentation") == REPO_URL
+        return "ours" if json.loads(manifest.read_text()).get("documentation") == REPO_URL else "other"
     except OSError, ValueError:
-        ours = False
-    if not ours:
-        LOGGER.warning("%s is another integration with the old domain; leaving it alone", folder)
-        return
-    shutil.rmtree(folder, ignore_errors=True)
-    LOGGER.info("Removed the old %s folder; restart Home Assistant to drop its leftover services", folder)
+        return "other"
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: FP400ConfigEntry) -> bool:

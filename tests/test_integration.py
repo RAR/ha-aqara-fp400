@@ -740,3 +740,35 @@ async def test_migrates_legacy_entry(
     assert device_registry.async_get(device.id).config_entry_id == entry.entry_id
     assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_zones") is None
     assert hass.states.get("sensor.my_zones").attributes["zones"][0]["name"] == "Bed"
+
+
+async def test_leaves_other_integration_with_old_domain(
+    hass: HomeAssistant, matter_client: MagicMock, enable_custom_integrations: None, tmp_path
+) -> None:
+    """A different integration installed under aqara_fp400 is neither migrated nor touched."""
+    import json
+    from unittest.mock import patch
+
+    node = await setup_integration_with_node_fixture(hass, "aqara_presence_fp400", matter_client, {})
+    matter_client.send_command.return_value = {"status": 0}
+    matter_client.read_attribute.return_value = {}
+    other = tmp_path / "custom_components" / "aqara_fp400"
+    other.mkdir(parents=True)
+    (other / "manifest.json").write_text(json.dumps({"domain": "aqara_fp400", "documentation": "https://example.org"}))
+    old = MockConfigEntry(domain="aqara_fp400", data={"zone_names": {"x": {"1": "Theirs"}}})
+    old.add_to_hass(hass)
+    entity_registry = er.async_get(hass)
+    entity_registry.async_get_or_create("sensor", "aqara_fp400", "theirs", config_entry=old)
+
+    entry = MockConfigEntry(domain="aqara_fp400_matter", data={})
+    entry.add_to_hass(hass)
+    with patch.object(hass.config, "path", side_effect=lambda *parts: str(tmp_path.joinpath(*parts))):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert hass.config_entries.async_entries("aqara_fp400") == [old]
+    assert entity_registry.async_get_entity_id("sensor", "aqara_fp400", "theirs") is not None
+    assert "zone_names" not in entry.data
+    assert (other / "manifest.json").is_file()
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_zones").state == "0"
+    assert node.node_id in entry.runtime_data.nodes
