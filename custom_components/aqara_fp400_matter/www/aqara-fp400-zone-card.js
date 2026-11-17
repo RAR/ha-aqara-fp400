@@ -5,7 +5,7 @@
  * background learning with a countdown.
  *
  * Config:
- *   type: custom:aqara-fp400-zone-card
+ *   type: custom:aqara-fp400-matter-zone-card
  *   entity: sensor.<device>_zones          (required; the "Zones" sensor of this integration)
  *   regions_entity: sensor.<device>_regions (optional; derived from `entity` when omitted)
  *   targets_entity: sensor.<device>_tracked_people   (optional; derived from `entity` when omitted)
@@ -793,7 +793,7 @@ class AqaraFp400ZoneCard extends HTMLElement {
     this._saving = true;
     this._render();
     try {
-      await this._hass.callService("aqara_fp400", service, { device_id: deviceId, ...data });
+      await this._hass.callService("aqara_fp400_matter", service, { device_id: deviceId, ...data });
       return true;
     } catch (err) {
       error.textContent = err?.message || String(err);
@@ -828,10 +828,14 @@ class AqaraFp400ZoneCard extends HTMLElement {
   }
 }
 
-customElements.define("aqara-fp400-zone-card", AqaraFp400ZoneCard);
+customElements.define("aqara-fp400-matter-zone-card", AqaraFp400ZoneCard);
+// The card was "aqara-fp400-zone-card" before 1.4.0; keep that type working unless another card already owns it.
+if (!customElements.get("aqara-fp400-zone-card")) {
+  customElements.define("aqara-fp400-zone-card", class extends AqaraFp400ZoneCard {});
+}
 window.customCards = window.customCards || [];
 window.customCards.push({
-  type: "aqara-fp400-zone-card",
+  type: "aqara-fp400-matter-zone-card",
   name: "Aqara FP400 zone card",
   description: "Paint detection zones and regions and watch tracked people on the FP400 grid.",
   preview: false,

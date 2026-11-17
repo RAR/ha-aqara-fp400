@@ -5,7 +5,7 @@ set_zones:
       selector:
         device:
           filter:
-            - integration: aqara_fp400
+            - integration: aqara_fp400_matter
             - integration: matter
     zones:
       required: true
@@ -24,7 +24,7 @@ clear_zones:
       selector:
         device:
           filter:
-            - integration: aqara_fp400
+            - integration: aqara_fp400_matter
             - integration: matter
 set_region:
   fields:
@@ -33,7 +33,7 @@ set_region:
       selector:
         device:
           filter:
-            - integration: aqara_fp400
+            - integration: aqara_fp400_matter
             - integration: matter
     region:
       required: true
@@ -56,7 +56,7 @@ clear_region:
       selector:
         device:
           filter:
-            - integration: aqara_fp400
+            - integration: aqara_fp400_matter
             - integration: matter
     region:
       required: true
@@ -73,7 +73,7 @@ subscribe_location:
       selector:
         device:
           filter:
-            - integration: aqara_fp400
+            - integration: aqara_fp400_matter
             - integration: matter
     timeout:
       default: 3600
@@ -89,7 +89,7 @@ start_learning:
       selector:
         device:
           filter:
-            - integration: aqara_fp400
+            - integration: aqara_fp400_matter
             - integration: matter
 remove_target:
   fields:
@@ -98,7 +98,7 @@ remove_target:
       selector:
         device:
           filter:
-            - integration: aqara_fp400
+            - integration: aqara_fp400_matter
             - integration: matter
     target_id:
       required: true
@@ -114,7 +114,7 @@ set_zone_name:
       selector:
         device:
           filter:
-            - integration: aqara_fp400
+            - integration: aqara_fp400_matter
             - integration: matter
     zone_id:
       required: true

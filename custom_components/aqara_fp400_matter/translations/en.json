@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "description": "Adds zones, live target positions and setup commands for every Aqara FP400 known to the Matter integration."
+        "description": "Adds zones, live target positions and setup commands for every Aqara FP400 known to the Matter integration. A setup from before 1.4.0 (integration aqara_fp400) is taken over: its device, entities and zone names move to this entry."
       }
     },
     "abort": {

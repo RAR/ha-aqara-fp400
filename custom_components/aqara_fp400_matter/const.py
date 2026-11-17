@@ -6,7 +6,9 @@ import base64
 from collections.abc import Iterable
 import logging
 
-DOMAIN = "aqara_fp400"
+DOMAIN = "aqara_fp400_matter"
+LEGACY_DOMAIN = "aqara_fp400"  # domain before 1.4.0; a setup under it is migrated on first load
+REPO_URL = "https://github.com/RAR/ha-aqara-fp400"
 LOGGER = logging.getLogger(__package__)
 
 VENDOR_ID = 0x115F

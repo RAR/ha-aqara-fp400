@@ -1,4 +1,4 @@
-"""Tests for the aqara_fp400 custom integration (not part of core; lives in ~/fp400/hacs)."""
+"""Tests for the aqara_fp400_matter custom integration (not part of core; lives in ~/fp400/hacs)."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ async def fp400(hass: HomeAssistant, matter_client: MagicMock, enable_custom_int
     )
     matter_client.send_command.return_value = {"status": 0}
     matter_client.read_attribute.return_value = {}
-    entry = MockConfigEntry(domain="aqara_fp400", data={})
+    entry = MockConfigEntry(domain="aqara_fp400_matter", data={})
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
@@ -144,7 +144,7 @@ async def test_location_event(hass: HomeAssistant, matter_client: MagicMock, fp4
     device_id = er.async_get(hass).async_get("sensor.aqara_spatial_multi_sensor_fp400_radar_zones").device_id
     matter_client.send_command.return_value = {"status": 0}
     await hass.services.async_call(
-        "aqara_fp400", "remove_target", {"device_id": device_id, "target_id": 1}, blocking=True
+        "aqara_fp400_matter", "remove_target", {"device_id": device_id, "target_id": 1}, blocking=True
     )
     call = matter_client.send_command.call_args
     assert call.args[0] == APICommand.DEVICE_COMMAND
@@ -174,7 +174,7 @@ async def test_set_zones_service(hass: HomeAssistant, matter_client: MagicMock, 
     matter_entity = er.async_get(hass).async_get("sensor.aqara_spatial_multi_sensor_fp400_illuminance")
     device = dr.async_get(hass).async_get(matter_entity.device_id)  # the Matter device also resolves
     response = await hass.services.async_call(
-        "aqara_fp400",
+        "aqara_fp400_matter",
         "set_zones",
         {
             "device_id": device.id,
@@ -253,7 +253,7 @@ async def test_reloads_with_matter(hass: HomeAssistant, matter_client: MagicMock
     from homeassistant.config_entries import ConfigEntryState
 
     matter_entry = hass.config_entries.async_loaded_entries("matter")[0]
-    own_entry = hass.config_entries.async_loaded_entries("aqara_fp400")[0]
+    own_entry = hass.config_entries.async_loaded_entries("aqara_fp400_matter")[0]
     setups_before = matter_client.subscribe_events.call_count
 
     await hass.config_entries.async_reload(matter_entry.entry_id)
@@ -292,7 +292,7 @@ async def test_live_tracking_survives_matter_reload(hass: HomeAssistant, matter_
     await hass.async_block_till_done()
 
     assert hass.states.get(switch).state == "on"
-    own_entry = hass.config_entries.async_loaded_entries("aqara_fp400")[0]
+    own_entry = hass.config_entries.async_loaded_entries("aqara_fp400_matter")[0]
     assert all(fp.live_tracking for fp in own_entry.runtime_data.nodes.values())
 
 
@@ -404,7 +404,7 @@ async def test_region_reverts_when_device_keeps_its_own(hass: HomeAssistant, mat
     # The device answers every read-back with the full grid: the drawing must not stick.
     matter_client.read_attribute.return_value = {path: full}
     await hass.services.async_call(
-        "aqara_fp400",
+        "aqara_fp400_matter",
         "set_region",
         {"device_id": _radar_device(hass), "region": "monitoring", "cells": "0-3,0-3"},
         blocking=True,
@@ -423,7 +423,7 @@ async def test_region_reverts_when_device_keeps_its_own(hass: HomeAssistant, mat
     # No answer at all: fall back to what the device had before the write.
     matter_client.read_attribute.side_effect = TimeoutError
     await hass.services.async_call(
-        "aqara_fp400",
+        "aqara_fp400_matter",
         "set_region",
         {"device_id": _radar_device(hass), "region": "monitoring", "cells": "0-3,0-3"},
         blocking=True,
@@ -440,7 +440,7 @@ async def test_region_reverts_when_device_keeps_its_own(hass: HomeAssistant, mat
     matter_client.send_command.return_value = [{"Path": path, "Status": 134}]
     with pytest.raises(HomeAssistantError):
         await hass.services.async_call(
-            "aqara_fp400",
+            "aqara_fp400_matter",
             "set_region",
             {"device_id": _radar_device(hass), "region": "monitoring", "cells": "0-3,0-3"},
             blocking=True,
@@ -538,12 +538,12 @@ async def test_zone_names(hass: HomeAssistant, matter_client: MagicMock, fp400) 
     """Names are stored by the integration (keyed by serial) and shown on zones and motion sensors."""
     device_id = _radar_device(hass)
     await hass.services.async_call(
-        "aqara_fp400", "set_zone_name", {"device_id": device_id, "zone_id": 1, "name": " Bed "}, blocking=True
+        "aqara_fp400_matter", "set_zone_name", {"device_id": device_id, "zone_id": 1, "name": " Bed "}, blocking=True
     )
     await hass.async_block_till_done()
     zones = hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_zones")
     assert zones.attributes["zones"][0]["name"] == "Bed"
-    entry = hass.config_entries.async_entries("aqara_fp400")[0]
+    entry = hass.config_entries.async_entries("aqara_fp400_matter")[0]
     serial = str(fp400.node_data.attributes["0/40/15"])
     assert entry.data["zone_names"] == {serial: {"1": "Bed"}}
 
@@ -556,11 +556,11 @@ async def test_zone_names(hass: HomeAssistant, matter_client: MagicMock, fp400) 
     assert motion.attributes["zone"] == 1 and motion.attributes["zone_name"] == "Bed"
 
     await hass.services.async_call(
-        "aqara_fp400", "set_zone_name", {"device_id": device_id, "zone_id": 1}, blocking=True
+        "aqara_fp400_matter", "set_zone_name", {"device_id": device_id, "zone_id": 1}, blocking=True
     )
     await hass.async_block_till_done()
     assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_zones").attributes["zones"][0]["name"] is None
-    assert hass.config_entries.async_entries("aqara_fp400")[0].data["zone_names"] == {serial: {}}
+    assert hass.config_entries.async_entries("aqara_fp400_matter")[0].data["zone_names"] == {serial: {}}
 
 
 async def test_zone_motion_sensors_follow_zones(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:
@@ -584,7 +584,7 @@ async def test_zone_motion_sensors_follow_zones(hass: HomeAssistant, matter_clie
     assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_last_motion").state == "access"
 
     await hass.services.async_call(
-        "aqara_fp400",
+        "aqara_fp400_matter",
         "set_zones",
         {"device_id": _radar_device(hass), "zones": [{"id": 2, "cells": "3-4,6-10"}]},
         blocking=True,
@@ -625,9 +625,9 @@ async def test_set_zones_error_code_label(hass: HomeAssistant, matter_client: Ma
     call = {"device_id": _radar_device(hass), "zones": [{"id": 2, "cells": "3-4,6-10"}]}
     matter_client.send_command.return_value = {"errorCode": 5}
     with pytest.raises(HomeAssistantError, match="duplicate zone id"):
-        await hass.services.async_call("aqara_fp400", "set_zones", call, blocking=True)
+        await hass.services.async_call("aqara_fp400_matter", "set_zones", call, blocking=True)
     matter_client.send_command.return_value = {"errorCode": 0}
-    await hass.services.async_call("aqara_fp400", "set_zones", call, blocking=True)
+    await hass.services.async_call("aqara_fp400_matter", "set_zones", call, blocking=True)
 
 
 @pytest.mark.parametrize("cells", ["10-5,0-15", "0-20,0-15", "0-19,0-16", "3-4", "a,1", "3-4,", "1-,2"])
@@ -638,7 +638,7 @@ async def test_cell_spec_rejects_reversed_or_out_of_grid_ranges(
     matter_client.send_command.reset_mock()
     with pytest.raises(vol.Invalid):
         await hass.services.async_call(
-            "aqara_fp400",
+            "aqara_fp400_matter",
             "set_region",
             {"device_id": _radar_device(hass), "region": "monitoring", "cells": cells},
             blocking=True,
@@ -695,3 +695,48 @@ async def test_node_removed(hass: HomeAssistant, matter_client: MagicMock, fp400
 
     assert dr.async_get(hass).async_get(device_id) is None
     assert er.async_get(hass).async_get(zones) is None
+
+
+async def test_migrates_legacy_entry(
+    hass: HomeAssistant, matter_client: MagicMock, enable_custom_integrations: None
+) -> None:
+    """A setup under the pre-1.4.0 domain is taken over: device, entities (with their ids) and zone names."""
+    node = await setup_integration_with_node_fixture(hass, "aqara_presence_fp400", matter_client, {})
+    matter_client.send_command.return_value = {"status": 0}
+    matter_client.read_attribute.return_value = {}
+    serial = str(node.node_data.attributes["0/40/15"])
+    old = MockConfigEntry(domain="aqara_fp400", data={"zone_names": {serial: {"1": "Bed"}}})
+    old.add_to_hass(hass)
+    device_registry = dr.async_get(hass)
+    device = device_registry.async_get_or_create(
+        config_entry_id=old.entry_id, identifiers={("aqara_fp400", str(node.node_id))}, name="Old radar"
+    )
+    entity_registry = er.async_get(hass)
+    entity_registry.async_get_or_create(
+        "sensor",
+        "aqara_fp400",
+        f"aqara_fp400_{node.node_id}_zones",
+        suggested_object_id="my_zones",
+        config_entry=old,
+        device_id=device.id,
+    )
+    matter_client.read_attribute.return_value = {
+        "1/291503114/16": [{"zoneId": 1, "zoneType": 0, "zoneBitmask": base64.b64encode(ZONE_MASK).decode()}]
+    }
+
+    entry = MockConfigEntry(domain="aqara_fp400_matter", data={})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.config_entries.async_entries("aqara_fp400") == []
+    assert entry.data["zone_names"] == {serial: {"1": "Bed"}}
+    moved = entity_registry.async_get("sensor.my_zones")
+    assert moved is not None
+    assert moved.platform == "aqara_fp400_matter"
+    assert moved.unique_id == f"aqara_fp400_matter_{node.node_id}_zones"
+    assert moved.config_entry_id == entry.entry_id
+    assert device_registry.async_get(device.id).identifiers == {("aqara_fp400_matter", str(node.node_id))}
+    assert device_registry.async_get(device.id).config_entry_id == entry.entry_id
+    assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_zones") is None
+    assert hass.states.get("sensor.my_zones").attributes["zones"][0]["name"] == "Bed"

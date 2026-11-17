@@ -1,12 +1,12 @@
 # Zone card — design/handoff notes
 
-File: `custom_components/aqara_fp400/www/aqara-fp400-zone-card.js` — one self-contained Web Component
-(`<aqara-fp400-zone-card>`), shadow DOM, no external deps. Registered as a Lovelace module resource by
+File: `custom_components/aqara_fp400_matter/www/aqara-fp400-zone-card.js` — one self-contained Web Component
+(`<aqara-fp400-matter-zone-card>`, alias `<aqara-fp400-zone-card>`), shadow DOM, no external deps. Registered as a Lovelace module resource by
 `__init__.py::_async_register_card`.
 
 ## Deploy loop (to test in the live HA on beanbag)
 1. Edit the JS. Bump `manifest.json` "version".
-2. `cd custom_components && COPYFILE_DISABLE=1 tar czf /tmp/aqara_fp400.tgz aqara_fp400`
+2. `cd custom_components && COPYFILE_DISABLE=1 tar czf /tmp/aqara_fp400.tgz aqara_fp400_matter`
 3. `scp /tmp/aqara_fp400.tgz rar@10.75.0.238:/data/build/aqara_fp400.tgz` (served on :8766)
 4. On HA: `curl -s http://10.75.0.238:8766/aqara_fp400.tgz | tar xzf - -C /config/custom_components`, restart HA.
    (Andrew usually does step 4 + a browser hard-refresh.)
@@ -39,6 +39,6 @@ Commit + `git push origin main` when happy.
   discover — could be made more obvious.
 - Grid cell borders + region outlines + target dots can get busy; a design pass could calm the visual hierarchy.
 
-Current version: 1.3.9 (design pass 2026-09-21: segmented layer bar, cool-only zone palette, distance labels,
+Current version: 1.4.0 (design pass 2026-09-21: segmented layer bar, cool-only zone palette, distance labels,
 shaded area outside monitoring, selected-zone panel with Name / Proximity on-off / Delete, sync pill, footer Save bar). Commits are on `main` (github.com/RAR/ha-aqara-fp400). Full protocol/verification notes:
 `~/fp400/VERIFY_1196.md`, `~/fp400/NOTES.md`; upstream PR handoff `~/fp400/PR_NOTES.md`.

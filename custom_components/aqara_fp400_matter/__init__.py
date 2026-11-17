@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import contextlib
 from dataclasses import dataclass, field
+import json
 from pathlib import Path
+import shutil
 from typing import Any
 
 from homeassistant.components.matter.helpers import get_matter
@@ -18,6 +20,7 @@ from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse, cal
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.loader import async_get_integration
 from matter_server.client.models.node import MatterNode
@@ -29,9 +32,11 @@ from .const import (
     DOMAIN,
     GRID_COLS,
     GRID_ROWS,
+    LEGACY_DOMAIN,
     LOGGER,
     PRODUCT_ID_FP400,
     REGIONS,
+    REPO_URL,
     SERVICE_CLEAR_REGION,
     SERVICE_CLEAR_ZONES,
     SERVICE_REMOVE_TARGET,
@@ -48,6 +53,7 @@ from .node import FP400Node, Zone
 PLATFORMS = [Platform.SENSOR, Platform.SWITCH, Platform.BUTTON, Platform.SELECT, Platform.NUMBER]
 SIGNAL_NEW_NODE = f"{DOMAIN}_new_node"
 CARD_URL = f"/{DOMAIN}/aqara-fp400-zone-card.js"
+LEGACY_CARD_URL = f"/{LEGACY_DOMAIN}/aqara-fp400-zone-card.js"
 
 
 @dataclass
@@ -73,6 +79,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FP400ConfigEntry) -> boo
     if not matter_entries:
         raise ConfigEntryNotReady("The Matter integration is not loaded")
     matter_entry = matter_entries[0]
+    await _async_migrate_legacy(hass, entry)
     client = get_matter(hass).matter_client
     data = FP400Data()
     entry.runtime_data = data
@@ -149,6 +156,64 @@ def _attach_zone_names(hass: HomeAssistant, entry: FP400ConfigEntry, fp: FP400No
     fp.save_zone_names = save
 
 
+async def _async_migrate_legacy(hass: HomeAssistant, entry: FP400ConfigEntry) -> None:
+    """Take over a setup made under the pre-1.4.0 domain.
+
+    The integration was renamed from aqara_fp400 to aqara_fp400_matter for the HACS catalog (the old
+    domain was taken). HACS installs the new version next to the old folder, so the old entry keeps
+    loading until it is migrated here: its radar device and entities are re-pointed at this entry
+    (entity ids, names, areas and customizations survive), zone names are copied, the old entry is
+    removed and the old folder is deleted when it is this integration's own code.
+    """
+    old_entries = hass.config_entries.async_entries(LEGACY_DOMAIN)
+    if not old_entries:
+        return
+    device_registry = dr.async_get(hass)
+    entity_registry = er.async_get(hass)
+    for old in old_entries:
+        if old.state is ConfigEntryState.LOADED:
+            await hass.config_entries.async_unload(old.entry_id)
+        # Entities first: moving the device drops entities that still belong to the old entry.
+        for entity in er.async_entries_for_config_entry(entity_registry, old.entry_id):
+            unique_id = entity.unique_id
+            if unique_id.startswith(f"{LEGACY_DOMAIN}_"):
+                unique_id = f"{DOMAIN}_{unique_id[len(LEGACY_DOMAIN) + 1 :]}"
+            try:
+                entity_registry.async_update_entity_platform(
+                    entity.entity_id, DOMAIN, new_config_entry_id=entry.entry_id, new_unique_id=unique_id
+                )
+            except ValueError as err:
+                LOGGER.warning("Could not move %s to %s: %s", entity.entity_id, DOMAIN, err)
+        for device in dr.async_entries_for_config_entry(device_registry, old.entry_id):
+            identifiers = {(DOMAIN if d == LEGACY_DOMAIN else d, i) for d, i in device.identifiers}
+            device_registry.async_update_device(
+                device.id, new_identifiers=identifiers, new_config_entry_id=entry.entry_id
+            )
+        if CONF_ZONE_NAMES not in entry.data and old.data.get(CONF_ZONE_NAMES):
+            hass.config_entries.async_update_entry(
+                entry, data={**entry.data, CONF_ZONE_NAMES: old.data[CONF_ZONE_NAMES]}
+            )
+        await hass.config_entries.async_remove(old.entry_id)
+        LOGGER.info("Moved the %s setup to %s", LEGACY_DOMAIN, DOMAIN)
+    await hass.async_add_executor_job(_remove_legacy_folder, Path(hass.config.path("custom_components", LEGACY_DOMAIN)))
+
+
+def _remove_legacy_folder(folder: Path) -> None:
+    """Delete the pre-1.4.0 copy of this integration, and only that (not a different integration with that domain)."""
+    manifest = folder / "manifest.json"
+    if not manifest.is_file():
+        return
+    try:
+        ours = json.loads(manifest.read_text()).get("documentation") == REPO_URL
+    except OSError, ValueError:
+        ours = False
+    if not ours:
+        LOGGER.warning("%s is another integration with the old domain; leaving it alone", folder)
+        return
+    shutil.rmtree(folder, ignore_errors=True)
+    LOGGER.info("Removed the old %s folder; restart Home Assistant to drop its leftover services", folder)
+
+
 async def async_unload_entry(hass: HomeAssistant, entry: FP400ConfigEntry) -> bool:
     """Unload a config entry."""
     for unsub in entry.runtime_data.unsubscribe:
@@ -196,7 +261,10 @@ async def _async_register_card(hass: HomeAssistant) -> None:
         return
     if not getattr(resources, "loaded", True):
         await resources.async_load()
-    for item in resources.async_items():
+    for item in list(resources.async_items()):
+        if str(item.get("url", "")).startswith(LEGACY_CARD_URL):
+            await resources.async_delete_item(item["id"])  # the pre-1.4.0 copy; the new one is registered below
+            continue
         if not str(item.get("url", "")).startswith(CARD_URL):
             continue
         if item["url"] != url:

@@ -15,11 +15,18 @@ Running the FP400 on Zigbee instead? This integration does not apply; see
 
 ## Installation
 
-1. Add `https://github.com/RAR/ha-aqara-fp400` as a custom repository in HACS (category: Integration) and install it,
-   or copy `custom_components/aqara_fp400` into your `config/custom_components`.
+1. In HACS, search for **Aqara FP400 (Matter)** and download it. Until the catalog listing is merged, add
+   `https://github.com/RAR/ha-aqara-fp400` as a custom repository (category: Integration) first. Without HACS, copy
+   `custom_components/aqara_fp400_matter` into your `config/custom_components`.
 2. Restart Home Assistant and add the **Aqara FP400 (Matter)** integration from Settings → Devices & services. It finds
    every FP400 on the Matter integration by itself.
 3. Add the zone card to a dashboard (see below). The integration registers the card resource itself.
+
+**Updating from 1.3.x:** the integration domain changed from `aqara_fp400` to `aqara_fp400_matter` in 1.4.0 (the old
+name was already taken in the HACS catalog). After the update, restart and add the **Aqara FP400 (Matter)** integration
+once more: the new entry takes over the radar device, its entities (ids, names and areas stay), the zone names and the
+card resource, removes the old entry and deletes the old `custom_components/aqara_fp400` folder. Actions are now
+`aqara_fp400_matter.*`; update any automations. Cards configured as `custom:aqara-fp400-zone-card` keep working.
 
 ## Requirements
 
@@ -81,7 +88,7 @@ just the radar *device* is refused while the FP400 is still on the Matter server
 ## Services
 
 ```yaml
-action: aqara_fp400.set_zones
+action: aqara_fp400_matter.set_zones
 data:
   device_id: <the FP400 device>
   zones:
@@ -92,8 +99,8 @@ data:
       proximity_detection: true  # the zone's "proximity detection" setting (was `enabled` before 1.3.6)
 ```
 
-`aqara_fp400.clear_zones`, `aqara_fp400.subscribe_location` (timeout in seconds, max 3600) and
-`aqara_fp400.start_learning` take just `device_id`. `aqara_fp400.remove_target` (`device_id`, `target_id`) makes the
+`aqara_fp400_matter.clear_zones`, `aqara_fp400_matter.subscribe_location` (timeout in seconds, max 3600) and
+`aqara_fp400_matter.start_learning` take just `device_id`. `aqara_fp400_matter.remove_target` (`device_id`, `target_id`) makes the
 sensor drop one tracked target — a ghost from a fan or curtain; a real person is picked up again within seconds. The
 card does the same when you click a dot on the map; to silence a spot for good, paint it into the interference region.
 
@@ -101,7 +108,7 @@ Regions (the entry/exit, interference and monitoring-range areas, drawn as cell 
 same way:
 
 ```yaml
-action: aqara_fp400.set_region
+action: aqara_fp400_matter.set_region
 data:
   device_id: <the FP400 device>
   region: entry_exit        # or: interference, monitoring
@@ -112,11 +119,11 @@ Range specs are validated (rows 0–19, columns 0–15, no reversed ranges). Eve
 from the device; if the device keeps something else, the entities and the card show what the device has, with the
 error in the `error` attribute and in the card's status chip on every layer.
 
-`aqara_fp400.set_zone_name` (`device_id`, `zone_id`, `name`) names a zone. The sensor has no name field, so names are
+`aqara_fp400_matter.set_zone_name` (`device_id`, `zone_id`, `name`) names a zone. The sensor has no name field, so names are
 kept by Home Assistant (per sensor serial, so they survive re-pairing) and show up in the `zones` attribute, the per-zone
 motion sensors and the card; an empty name clears it.
 
-`aqara_fp400.clear_region` takes `device_id` and `region`. Clearing the `monitoring` region means the full grid (the
+`aqara_fp400_matter.clear_region` takes `device_id` and `region`. Clearing the `monitoring` region means the full grid (the
 device would detect nobody if the range were empty). The zone card can paint zones and all three regions —
 switch layers with the buttons above the grid.
 
@@ -132,7 +139,7 @@ device assign a person to single-column test zones.
 The integration serves a Lovelace card (pictured above); add it as a manual card:
 
 ```yaml
-type: custom:aqara-fp400-zone-card
+type: custom:aqara-fp400-matter-zone-card
 entity: sensor.aqara_spatial_multi_sensor_fp400_radar_zones
 title: Master bedroom      # optional
 sensor_at: top             # optional; top (like the Aqara app) or bottom
@@ -157,7 +164,7 @@ dashed. Turn on the live tracking switch to see people move.
 Tests run inside a Home Assistant core checkout so they can reuse the Matter test fixtures:
 
 ```
-ln -s $PWD/custom_components/aqara_fp400 <core>/tests/testing_config/custom_components/aqara_fp400
+ln -s $PWD/custom_components/aqara_fp400_matter <core>/tests/testing_config/custom_components/aqara_fp400_matter
 cp tests/test_integration.py <core>/tests/components/matter/test_zz_aqara_fp400.py
 cd <core> && pytest tests/components/matter/test_zz_aqara_fp400.py
 ```
