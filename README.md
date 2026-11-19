@@ -15,9 +15,9 @@ Running the FP400 on Zigbee instead? This integration does not apply; see
 
 ## Installation
 
-1. In HACS, search for **Aqara FP400 (Matter)** and download it. Until the catalog listing is merged, add
-   `https://github.com/RAR/ha-aqara-fp400` as a custom repository (category: Integration) first. Without HACS, copy
-   `custom_components/aqara_fp400_matter` into your `config/custom_components`.
+1. In HACS, search for **Aqara FP400 (Matter)** and download it (it is in the default HACS catalog). If you added
+   this repository as a custom repository earlier, you can remove that entry; HACS keeps the download. Without HACS,
+   copy `custom_components/aqara_fp400_matter` into your `config/custom_components`.
 2. Restart Home Assistant and add the **Aqara FP400 (Matter)** integration from Settings → Devices & services. It finds
    every FP400 on the Matter integration by itself.
 3. Add the zone card to a dashboard (see below). The integration registers the card resource itself.
