@@ -697,10 +697,23 @@ async def test_node_removed(hass: HomeAssistant, matter_client: MagicMock, fp400
     assert er.async_get(hass).async_get(zones) is None
 
 
+def _old_domain_folder(tmp_path, documentation: str):
+    """Write an aqara_fp400 manifest under tmp_path, which the test then uses as the config dir."""
+    import json
+
+    folder = tmp_path / "custom_components" / "aqara_fp400"
+    folder.mkdir(parents=True)
+    (folder / "manifest.json").write_text(json.dumps({"domain": "aqara_fp400", "documentation": documentation}))
+    return folder
+
+
 async def test_migrates_legacy_entry(
-    hass: HomeAssistant, matter_client: MagicMock, enable_custom_integrations: None
+    hass: HomeAssistant, matter_client: MagicMock, enable_custom_integrations: None, tmp_path
 ) -> None:
     """A setup under the pre-1.4.0 domain is taken over: device, entities (with their ids) and zone names."""
+    from unittest.mock import patch
+
+    _old_domain_folder(tmp_path, "https://github.com/RAR/ha-aqara-fp400")
     node = await setup_integration_with_node_fixture(hass, "aqara_presence_fp400", matter_client, {})
     matter_client.send_command.return_value = {"status": 0}
     matter_client.read_attribute.return_value = {}
@@ -726,8 +739,9 @@ async def test_migrates_legacy_entry(
 
     entry = MockConfigEntry(domain="aqara_fp400_matter", data={})
     entry.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    with patch.object(hass.config, "path", side_effect=lambda *parts: str(tmp_path.joinpath(*parts))):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
 
     assert hass.config_entries.async_entries("aqara_fp400") == []
     assert entry.data["zone_names"] == {serial: {"1": "Bed"}}
@@ -746,15 +760,12 @@ async def test_leaves_other_integration_with_old_domain(
     hass: HomeAssistant, matter_client: MagicMock, enable_custom_integrations: None, tmp_path
 ) -> None:
     """A different integration installed under aqara_fp400 is neither migrated nor touched."""
-    import json
     from unittest.mock import patch
 
+    other = _old_domain_folder(tmp_path, "https://example.org")
     node = await setup_integration_with_node_fixture(hass, "aqara_presence_fp400", matter_client, {})
     matter_client.send_command.return_value = {"status": 0}
     matter_client.read_attribute.return_value = {}
-    other = tmp_path / "custom_components" / "aqara_fp400"
-    other.mkdir(parents=True)
-    (other / "manifest.json").write_text(json.dumps({"domain": "aqara_fp400", "documentation": "https://example.org"}))
     old = MockConfigEntry(domain="aqara_fp400", data={"zone_names": {"x": {"1": "Theirs"}}})
     old.add_to_hass(hass)
     entity_registry = er.async_get(hass)
@@ -771,4 +782,31 @@ async def test_leaves_other_integration_with_old_domain(
     assert "zone_names" not in entry.data
     assert (other / "manifest.json").is_file()
     assert hass.states.get("sensor.aqara_spatial_multi_sensor_fp400_radar_zones").state == "0"
+    assert node.node_id in entry.runtime_data.nodes
+
+
+async def test_leaves_old_entry_without_proof(
+    hass: HomeAssistant, matter_client: MagicMock, enable_custom_integrations: None, tmp_path, caplog
+) -> None:
+    """Without the old folder nothing proves an aqara_fp400 entry is ours, so it is left alone."""
+    from unittest.mock import patch
+
+    node = await setup_integration_with_node_fixture(hass, "aqara_presence_fp400", matter_client, {})
+    matter_client.send_command.return_value = {"status": 0}
+    matter_client.read_attribute.return_value = {}
+    old = MockConfigEntry(domain="aqara_fp400", data={"zone_names": {"x": {"1": "Unknown"}}})
+    old.add_to_hass(hass)
+    entity_registry = er.async_get(hass)
+    entity_registry.async_get_or_create("sensor", "aqara_fp400", "unknown", config_entry=old)
+
+    entry = MockConfigEntry(domain="aqara_fp400_matter", data={})
+    entry.add_to_hass(hass)
+    with patch.object(hass.config, "path", side_effect=lambda *parts: str(tmp_path.joinpath(*parts))):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert hass.config_entries.async_entries("aqara_fp400") == [old]
+    assert entity_registry.async_get_entity_id("sensor", "aqara_fp400", "unknown") is not None
+    assert "zone_names" not in entry.data
+    assert "cannot be confirmed" in caplog.text
     assert node.node_id in entry.runtime_data.nodes

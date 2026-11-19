@@ -26,10 +26,11 @@ Running the FP400 on Zigbee instead? This integration does not apply; see
 name was already taken in the HACS catalog). HACS cannot update across a domain change, so remove the integration in
 HACS and download it again (leave the old entry under Devices & services in place), restart, and add the
 **Aqara FP400 (Matter)** integration once more: the new entry takes over the radar device, its entities (ids, names and
-areas stay), the zone names and the card resource and removes the old entry. If a `custom_components/aqara_fp400`
-folder is still there afterwards it is unused; delete it when convenient (unless another integration with that domain
-is installed there). Actions are now `aqara_fp400_matter.*`; update any automations. Cards configured as
-`custom:aqara-fp400-zone-card` keep working.
+areas stay), the zone names and the card resource and removes the old entry. The takeover only happens while the
+old `custom_components/aqara_fp400` folder still holds this integration's 1.3.x files (that is the proof the old
+entry is ours; another integration uses that domain and is never touched), so keep the folder until the new entry
+has loaded once. After that it is unused; delete it when convenient. Actions are now `aqara_fp400_matter.*`; update
+any automations. Cards configured as `custom:aqara-fp400-zone-card` keep working.
 
 ## Requirements
 

@@ -78,7 +78,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: FP400ConfigEntry) -> boo
     if not matter_entries:
         raise ConfigEntryNotReady("The Matter integration is not loaded")
     matter_entry = matter_entries[0]
-    await _async_migrate_legacy(hass, entry)
+    legacy_owner = await _async_legacy_owner(hass)
+    await _async_migrate_legacy(hass, entry, legacy_owner)
     client = get_matter(hass).matter_client
     data = FP400Data()
     entry.runtime_data = data
@@ -93,7 +94,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FP400ConfigEntry) -> boo
 
     entry.async_on_unload(matter_entry.async_on_state_change(_on_matter_state_change))
 
-    await _async_register_card(hass)
+    await _async_register_card(hass, legacy_owner)
 
     async def _add_node(node: MatterNode) -> None:
         if node.node_id in data.nodes or not is_fp400(node):
@@ -155,23 +156,34 @@ def _attach_zone_names(hass: HomeAssistant, entry: FP400ConfigEntry, fp: FP400No
     fp.save_zone_names = save
 
 
-async def _async_migrate_legacy(hass: HomeAssistant, entry: FP400ConfigEntry) -> None:
+async def _async_migrate_legacy(hass: HomeAssistant, entry: FP400ConfigEntry, owner: str) -> None:
     """Take over a setup made under the pre-1.4.0 domain.
 
     The integration was renamed from aqara_fp400 to aqara_fp400_matter for the HACS catalog (the old
     domain was taken). HACS installs the new version next to the old folder, so the old entry keeps
     loading until it is migrated here: its radar device and entities are re-pointed at this entry
     (entity ids, names, areas and customizations survive), zone names are copied and the old entry is
-    removed. The old folder is left in place; nothing loads it once its entry is gone. If a different
-    integration owns the old domain (its manifest does not point at this repository), nothing is touched.
+    removed. The old folder is left in place; nothing loads it once its entry is gone.
+
+    Only a setup proven to be ours is touched: the old folder must still hold this integration's
+    manifest. Another integration uses the old domain too, so without that proof an aqara_fp400 entry
+    (and its devices and entities) may be theirs and is left alone.
     """
     old_entries = hass.config_entries.async_entries(LEGACY_DOMAIN)
     if not old_entries:
         return
-    folder = Path(hass.config.path("custom_components", LEGACY_DOMAIN))
-    owner = await hass.async_add_executor_job(_legacy_folder_owner, folder)
+    folder = hass.config.path("custom_components", LEGACY_DOMAIN)
     if owner == "other":
         LOGGER.warning("%s is another integration with the old domain; leaving it and its setup alone", folder)
+        return
+    if owner != "ours":
+        LOGGER.warning(
+            "Found a %s setup but %s is missing, so it cannot be confirmed as a pre-1.4.0 copy of this "
+            "integration; leaving it alone. To migrate it, restore that folder from release v1.3.9 and "
+            "restart; otherwise remove the old integration entry by hand",
+            LEGACY_DOMAIN,
+            folder,
+        )
         return
     device_registry = dr.async_get(hass)
     entity_registry = er.async_get(hass)
@@ -200,8 +212,13 @@ async def _async_migrate_legacy(hass: HomeAssistant, entry: FP400ConfigEntry) ->
             )
         await hass.config_entries.async_remove(old.entry_id)
         LOGGER.info("Moved the %s setup to %s", LEGACY_DOMAIN, DOMAIN)
-    if owner == "ours":
-        LOGGER.info("The old folder %s is no longer used; it can be deleted", folder)
+    LOGGER.info("The old folder %s is no longer used; it can be deleted", folder)
+
+
+async def _async_legacy_owner(hass: HomeAssistant) -> str:
+    """Who owns custom_components/aqara_fp400 on this instance (see _legacy_folder_owner)."""
+    folder = Path(hass.config.path("custom_components", LEGACY_DOMAIN))
+    return await hass.async_add_executor_job(_legacy_folder_owner, folder)
 
 
 def _legacy_folder_owner(folder: Path) -> str:
@@ -231,7 +248,7 @@ async def async_remove_config_entry_device(
     return not any(fp.own_identifier in device_entry.identifiers for fp in entry.runtime_data.nodes.values())
 
 
-async def _async_register_card(hass: HomeAssistant) -> None:
+async def _async_register_card(hass: HomeAssistant, legacy_owner: str) -> None:
     """Serve the bundled card and register it as a Lovelace resource (like HACS does).
 
     Skipped when http/frontend are not loaded (tests). Injecting the script through
@@ -264,7 +281,10 @@ async def _async_register_card(hass: HomeAssistant) -> None:
         await resources.async_load()
     for item in list(resources.async_items()):
         if str(item.get("url", "")).startswith(LEGACY_CARD_URL):
-            await resources.async_delete_item(item["id"])  # the pre-1.4.0 copy; the new one is registered below
+            # The other integration on the old domain serves its card at this URL too; only drop the
+            # resource when the old folder is our pre-1.4.0 copy. The new one is registered below.
+            if legacy_owner == "ours":
+                await resources.async_delete_item(item["id"])
             continue
         if not str(item.get("url", "")).startswith(CARD_URL):
             continue
