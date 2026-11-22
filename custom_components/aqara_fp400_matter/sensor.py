@@ -7,7 +7,6 @@ from typing import Any
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.const import DEGREE, EntityCategory, UnitOfLength
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -16,14 +15,13 @@ from .const import (
     ACTIVITY_STATES,
     ATTR_INSTALL_ANGLE,
     ATTR_INSTALL_STATUS,
-    DOMAIN,
     GRID_COLS,
     GRID_ROWS,
     INSTALL_STATUSES,
     MAX_TARGETS,
     MOTION_OPTIONS,
 )
-from .entity import FP400Entity
+from .entity import FP400Entity, FP400ZoneEntity, follow_zones
 from .node import FP400Node
 
 
@@ -48,39 +46,11 @@ async def async_setup_entry(
             entities.append(TargetAxisSensor(fp, index, "x"))
             entities.append(TargetAxisSensor(fp, index, "y"))
         async_add_entities(entities)
-        _follow_zones(hass, entry, fp, async_add_entities)
+        follow_zones(hass, entry, fp, async_add_entities, "sensor", ZoneMotionSensor)
 
     for fp in entry.runtime_data.nodes.values():
         _add(fp)
     entry.async_on_unload(async_dispatcher_connect(hass, SIGNAL_NEW_NODE, _add))
-
-
-@callback
-def _follow_zones(
-    hass: HomeAssistant, entry: FP400ConfigEntry, fp: FP400Node, async_add_entities: AddEntitiesCallback
-) -> None:
-    """Keep one last-motion sensor per configured zone: added and removed with the zones."""
-    present: dict[int, ZoneMotionSensor] = {}
-
-    @callback
-    def sync() -> None:
-        wanted = {zone.zone_id for zone in fp.zones}
-        if new := sorted(wanted - present.keys()):
-            entities = [ZoneMotionSensor(fp, zone_id) for zone_id in new]
-            present.update({e.zone_id: e for e in entities})
-            async_add_entities(entities)
-        for zone_id in sorted(present.keys() - wanted):
-            entity = present.pop(zone_id)
-            hass.async_create_task(_remove(entity))
-
-    async def _remove(entity: ZoneMotionSensor) -> None:
-        await entity.async_remove(force_remove=True)
-        registry = er.async_get(hass)
-        if entity_id := registry.async_get_entity_id("sensor", DOMAIN, entity.unique_id):
-            registry.async_remove(entity_id)
-
-    entry.async_on_unload(fp.add_listener(sync))
-    sync()
 
 
 class ZonesSensor(FP400Entity, SensorEntity):
@@ -212,7 +182,7 @@ class LastMotionSensor(FP400Entity, SensorEntity):
         }
 
 
-class ZoneMotionSensor(FP400Entity, SensorEntity):
+class ZoneMotionSensor(FP400ZoneEntity, SensorEntity):
     """Last MotionDetected event of one zone (its child endpoint reports enter/left/... too)."""
 
     _attr_device_class = SensorDeviceClass.ENUM
@@ -220,10 +190,8 @@ class ZoneMotionSensor(FP400Entity, SensorEntity):
     _attr_icon = "mdi:motion-sensor"
 
     def __init__(self, fp: FP400Node, zone_id: int) -> None:
-        super().__init__(fp, f"zone_{zone_id}_last_motion")
+        super().__init__(fp, zone_id, "last_motion")
         self._attr_translation_key = "zone_motion"
-        self._attr_translation_placeholders = {"id": str(zone_id)}
-        self.zone_id = zone_id
 
     @property
     def native_value(self) -> str | None:

@@ -75,10 +75,12 @@ any automations. Cards configured as `custom:aqara-fp400-zone-card` keep working
 | `sensor.<name>_radar_target_N_x` / `_y` | position of target N (disabled by default; enable for radar map cards) |
 | `sensor.<name>_radar_last_motion` | last motion event: enter / left / left_in / right_out / right_in / left_out / access / away (or `unrecognized` for a code this integration does not know yet; the code is logged); attributes `zone`, `zone_name`, `at` |
 | `sensor.<name>_radar_zone_N_last_motion` | the same per zone — one sensor per configured zone, created and removed with the zones |
+| `binary_sensor.<name>_radar_zone_N_occupancy` | someone is in zone N — one per configured zone, created and removed with the zones. Unlike the device's own zone occupancy (motion-triggered, drops while a person sits still) it follows the tracked people while live tracking is on (the device's zone id, or the position against the zone's cells), and the zone's enter/access and leave events otherwise; always off while the room is empty. Attributes `zone`, `zone_name`, `source` (tracking / events) |
 | `sensor.<name>_radar_activity_state` / `_human_count` | activity (unknown/active/still) and the device's own people count — its estimate from the radar, reported whether or not live tracking is on; *tracked people* above is the number of targets in the position stream, so the two can differ |
 | `sensor.<name>_radar_install_status` / `_install_angle` | orientation from the tilt sensor (diagnostic) |
 | `select.<name>_radar_install_mode` / `_side_install_position` / `_coordinate_reverse` / `_detection_direction` / `_proximity_distance_level` | install and detection settings |
 | `number.<name>_radar_install_height` | mounting height in mm (limits from the device) |
+| `number.<name>_radar_zone_occupancy_off_delay` | seconds a zone occupancy sensor stays on after the last sign of someone in the zone (default 30), so a short tracker dropout or a slow leave event does not flap it |
 | `switch.<name>_radar_live_tracking` | keeps the position stream alive (~7 updates/s while someone moves) |
 | `button.<name>_radar_start_background_learning` | starts the AI space background learning |
 | `button.<name>_radar_clear_zones` | removes all zones |

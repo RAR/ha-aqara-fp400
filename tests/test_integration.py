@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import base64
+from datetime import timedelta
 from unittest.mock import MagicMock
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 from matter_server.common.models import APICommand, EventType, MatterNodeEvent
 import pytest
-from tests.common import MockConfigEntry
+from tests.common import MockConfigEntry, async_fire_time_changed
 import voluptuous as vol
 
 from .common import setup_integration_with_node_fixture, trigger_subscription_callback
@@ -810,3 +812,113 @@ async def test_leaves_old_entry_without_proof(
     assert "zone_names" not in entry.data
     assert "cannot be confirmed" in caplog.text
     assert node.node_id in entry.runtime_data.nodes
+
+
+ZONE1_OCCUPANCY = "binary_sensor.aqara_spatial_multi_sensor_fp400_radar_zone_1_occupancy"
+OFF_DELAY = "number.aqara_spatial_multi_sensor_fp400_radar_zone_occupancy_off_delay"
+
+
+def _location_event(node_id: int, targets: list[dict], number: int = 1) -> MatterNodeEvent:
+    return MatterNodeEvent(
+        node_id=node_id,
+        endpoint_id=1,
+        cluster_id=CLUSTER_LOCATION,
+        event_id=0,
+        event_number=number,
+        priority=1,
+        timestamp=0,
+        timestamp_type=0,
+        data={"targets": targets},
+    )
+
+
+async def test_zone_occupancy_from_tracking(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:
+    """With live tracking on, a zone is occupied while a tracked person is inside it (even sitting still)."""
+    switch = "switch.aqara_spatial_multi_sensor_fp400_radar_live_tracking"
+    state = hass.states.get(ZONE1_OCCUPANCY)
+    assert state.state == "off"
+    assert state.attributes["source"] == "events"
+    assert hass.states.get(OFF_DELAY).state == "30.0"
+
+    await hass.services.async_call("switch", "turn_on", {"entity_id": switch}, blocking=True)
+    assert hass.states.get(ZONE1_OCCUPANCY).attributes["source"] == "tracking"
+    # zone 1 = cells (4,8),(4,9); y=228 cm -> row 4, x=-5 -> col 8; the device does not tag the zone (older firmware)
+    still_in_zone = {"targetId": 1, "x": -5, "y": 228, "dynPnts": 0, "mmsPnts": 10, "trackingState": 0}
+    await trigger_subscription_callback(
+        hass,
+        matter_client,
+        EventType.NODE_EVENT,
+        _location_event(fp400.node_id, [still_in_zone]),
+        node_id=fp400.node_id,
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(ZONE1_OCCUPANCY).state == "on"
+
+    # the person moves out: off only after the delay
+    outside = {"targetId": 1, "x": -5, "y": 50, "dynPnts": 5}
+    await trigger_subscription_callback(
+        hass, matter_client, EventType.NODE_EVENT, _location_event(fp400.node_id, [outside], 2), node_id=fp400.node_id
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(ZONE1_OCCUPANCY).state == "on"
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
+    await hass.async_block_till_done()
+    assert hass.states.get(ZONE1_OCCUPANCY).state == "off"
+
+    # a fan in the zone does not count; the device's zone id does, whatever the position says
+    fan = {"targetId": 2, "x": -5, "y": 228, "dynPnts": 0, "targetType": 2}
+    tagged = {"targetId": 3, "x": 300, "y": 900, "dynPnts": 3, "targetZoneId": 1}
+    await trigger_subscription_callback(
+        hass, matter_client, EventType.NODE_EVENT, _location_event(fp400.node_id, [fan], 3), node_id=fp400.node_id
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(ZONE1_OCCUPANCY).state == "off"
+    await trigger_subscription_callback(
+        hass, matter_client, EventType.NODE_EVENT, _location_event(fp400.node_id, [tagged], 4), node_id=fp400.node_id
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(ZONE1_OCCUPANCY).state == "on"
+
+    # the room going empty clears the zone without the delay once the delay is 0
+    await hass.services.async_call("number", "set_value", {"entity_id": OFF_DELAY, "value": 0}, blocking=True)
+    await _push_attribute(hass, matter_client, fp400, "1/1030/0", 0)
+    await hass.async_block_till_done()
+    assert hass.states.get(ZONE1_OCCUPANCY).state == "off"
+
+
+async def test_zone_occupancy_from_events(hass: HomeAssistant, matter_client: MagicMock, fp400) -> None:
+    """Without live tracking the zone's own enter/access and leave events drive the sensor."""
+    await hass.services.async_call("number", "set_value", {"entity_id": OFF_DELAY, "value": 0}, blocking=True)
+    fp400.node_data.attributes["3/291503115/1"] = 1  # endpoint 3 is zone 1
+    await _push_attribute(hass, matter_client, fp400, "1/1030/0", 1)  # room occupied
+
+    async def motion(code: int, number: int) -> None:
+        await trigger_subscription_callback(
+            hass,
+            matter_client,
+            EventType.NODE_EVENT,
+            _motion_event(fp400.node_id, 3, code, number),
+            node_id=fp400.node_id,
+        )
+        await hass.async_block_till_done()
+
+    await motion(0, 1)  # enter
+    assert hass.states.get(ZONE1_OCCUPANCY).state == "on"
+    await motion(1, 2)  # left
+    assert hass.states.get(ZONE1_OCCUPANCY).state == "off"
+    await motion(6, 3)  # access
+    assert hass.states.get(ZONE1_OCCUPANCY).state == "on"
+    await _push_attribute(hass, matter_client, fp400, "1/1030/0", 0)  # room empty
+    await hass.async_block_till_done()
+    assert hass.states.get(ZONE1_OCCUPANCY).state == "off"
+
+    # the sensor goes away with its zone
+    await hass.services.async_call(
+        "aqara_fp400_matter",
+        "set_zones",
+        {"device_id": _radar_device(hass), "zones": [{"id": 2, "cells": "3-4,6-10"}]},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(ZONE1_OCCUPANCY) is None
+    assert hass.states.get("binary_sensor.aqara_spatial_multi_sensor_fp400_radar_zone_2_occupancy").state == "off"

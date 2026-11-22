@@ -155,6 +155,23 @@ MOTION_EVENTS = {
 # update). Not "unknown": that would read like Home Assistant's own unknown state.
 MOTION_UNRECOGNIZED = "unrecognized"
 MOTION_OPTIONS = [*MOTION_EVENTS.values(), MOTION_UNRECOGNIZED]
+# What a zone's MotionDetected event says about presence inside it (the fallback for the per-zone
+# occupancy sensors while live tracking is off): the "in"/enter/access codes put someone in the zone,
+# the "out"/left/away codes take them out.
+MOTION_PRESENCE = {
+    "enter": True,
+    "left_in": True,
+    "right_in": True,
+    "access": True,
+    "left": False,
+    "right_out": False,
+    "left_out": False,
+    "away": False,
+}
+# Per-zone occupancy: how long a zone stays occupied after the last sign of someone in it, so a
+# tracker dropout or a slow leave event does not flap the sensor. Adjustable with the number entity.
+ZONE_OFF_DELAY_DEFAULT_S = 30
+ZONE_OFF_DELAY_MAX_S = 600
 
 CONF_NODE_ID = "node_id"
 

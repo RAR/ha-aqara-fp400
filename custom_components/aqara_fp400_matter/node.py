@@ -48,6 +48,7 @@ from .const import (
     LOGGER,
     MAX_ZONES,
     MOTION_EVENTS,
+    MOTION_PRESENCE,
     MOTION_UNRECOGNIZED,
     REGIONS,
     SENSOR_ENDPOINT,
@@ -55,6 +56,7 @@ from .const import (
     TARGET_TYPES,
     TARGETS_EXPIRE_S,
     WATCHED_ATTRIBUTES,
+    ZONE_OFF_DELAY_DEFAULT_S,
     ZONE_POLL_S,
     cell_from_position,
     cells_to_mask,
@@ -252,6 +254,12 @@ class FP400Node:
     learning_finished_at: datetime | None = None
     learning_zones: int | None = None  # zones on the device after the last learning run
     live_tracking: bool = False
+    # Per-zone occupancy (binary sensors): the reported state, what the zone's own events last said, and
+    # the delay before a zone is reported empty.
+    zone_occupied: dict[int, bool] = field(default_factory=dict)
+    zone_event_presence: dict[int, bool] = field(default_factory=dict)
+    zone_off_delay_s: float = ZONE_OFF_DELAY_DEFAULT_S
+    _zone_off_unsubs: dict[int, Callable[[], None]] = field(default_factory=dict)
     zones_pending: bool = False
     zones_error: str | None = None
     regions: dict[str, list[list[int]]] = field(default_factory=dict)
@@ -421,6 +429,9 @@ class FP400Node:
         if self._learning_unsub is not None:
             self._learning_unsub()
             self._learning_unsub = None
+        for unsub in self._zone_off_unsubs.values():
+            unsub()
+        self._zone_off_unsubs.clear()
 
     @callback
     def add_listener(self, listener: Callable[[], None], targets: bool = False) -> Callable[[], None]:
@@ -435,14 +446,93 @@ class FP400Node:
 
     @callback
     def _notify(self) -> None:
+        self._update_zone_occupancy()
         for listener in (*self._listeners, *self._target_listeners):
             listener()
 
     @callback
     def _notify_targets(self) -> None:
-        """Position updates arrive ~7/s; only wake the entities that show them."""
+        """Position updates arrive ~7/s; only wake the entities that show them, unless a zone's occupancy changed."""
+        if self._update_zone_occupancy():
+            self._notify()
+            return
         for listener in self._target_listeners:
             listener()
+
+    # ---- per-zone occupancy ----------------------------------------------
+
+    @property
+    def zone_occupancy_source(self) -> str:
+        """Where the per-zone occupancy comes from: tracked targets while live tracking is on, else zone events."""
+        return "tracking" if self.live_tracking else "events"
+
+    def _zone_has_person(self, zone: Zone) -> bool:
+        """True while a tracked person is inside the zone (the device's zone id, or the position's cell)."""
+        cells = {(row, col) for row, col in zone.cells}
+        return any(t.is_person and (t.zone_id == zone.zone_id or (t.row, t.col) in cells) for t in self.targets)
+
+    @callback
+    def _update_zone_occupancy(self) -> bool:
+        """Recompute every zone's occupancy; True when a reported state changed.
+
+        Occupied while a tracked person is in the zone (live tracking on; the targets are dropped when
+        the device reports the room empty) or, with live tracking off, after the zone's own enter/access
+        event while the device reports the room occupied. Going empty is delayed by zone_off_delay_s;
+        presence in the meantime cancels it.
+        """
+        changed = False
+        zone_ids = {zone.zone_id for zone in self.zones}
+        for zone_id in [z for z in self.zone_occupied if z not in zone_ids]:  # zone deleted
+            self._cancel_zone_off(zone_id)
+            self.zone_occupied.pop(zone_id)
+            self.zone_event_presence.pop(zone_id, None)
+            changed = True
+        room_occupied = self._room_occupied
+        for zone in self.zones:
+            zone_id = zone.zone_id
+            if self.live_tracking:
+                present = self._zone_has_person(zone)
+            else:
+                present = room_occupied and self.zone_event_presence.get(zone_id, False)
+            reported = self.zone_occupied.get(zone_id, False)
+            if present:
+                self._cancel_zone_off(zone_id)
+                if not reported:
+                    self.zone_occupied[zone_id] = True
+                    changed = True
+            elif reported and zone_id not in self._zone_off_unsubs:
+                if self.zone_off_delay_s <= 0:
+                    self.zone_occupied[zone_id] = False
+                    changed = True
+                else:
+                    self._zone_off_unsubs[zone_id] = async_call_later(
+                        self.hass, self.zone_off_delay_s, partial(self._zone_off, zone_id)
+                    )
+            elif not reported and zone_id not in self.zone_occupied:
+                self.zone_occupied[zone_id] = False
+                changed = True
+        return changed
+
+    @callback
+    def _cancel_zone_off(self, zone_id: int) -> None:
+        if unsub := self._zone_off_unsubs.pop(zone_id, None):
+            unsub()
+
+    @callback
+    def _zone_off(self, zone_id: int, _now: datetime) -> None:
+        """The off delay ran out without presence returning (presence cancels the timer)."""
+        self._zone_off_unsubs.pop(zone_id, None)
+        if self.zone_occupied.get(zone_id):
+            self.zone_occupied[zone_id] = False
+            self._notify()
+
+    @callback
+    def set_zone_off_delay(self, seconds: float) -> None:
+        """Change the off delay; a shorter one is applied to zones already waiting to go empty."""
+        self.zone_off_delay_s = max(0.0, seconds)
+        for zone_id in list(self._zone_off_unsubs):
+            self._cancel_zone_off(zone_id)
+        self._notify()
 
     @callback
     def _clear_targets(self) -> None:
@@ -763,6 +853,8 @@ class FP400Node:
             self.last_motion_at = dt_util.utcnow()
             if self.last_motion_zone is not None:
                 self.zone_motion[self.last_motion_zone] = (self.last_motion, self.last_motion_at)
+                if (presence := MOTION_PRESENCE.get(self.last_motion)) is not None:
+                    self.zone_event_presence[self.last_motion_zone] = presence
             self._notify()
 
     # ---- commands --------------------------------------------------------
